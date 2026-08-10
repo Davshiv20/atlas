@@ -28,6 +28,7 @@ import yaml
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from atlas.classify import Consequence
+from atlas.policy import TrustAssessment
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,11 @@ class Fact(BaseModel):
     subject: str  # "conversations" or "conversations.created_at"
     aspect: str  # "grain" | "semantics" | "join" | "metric" | ...
     claim: str
+    # Evidence-derived trust score, not a probability and never model-authored.
     confidence: float = Field(ge=0.0, le=1.0)
+    # Optional only so existing YAML written before trust-factor breakdowns can
+    # still load. Every newly evaluated claim carries the full assessment.
+    trust: TrustAssessment | None = None
     provenance: list[Provenance] = Field(min_length=1)
     status: FactStatus = FactStatus.UNVERIFIED
     verified_by: str | None = None
@@ -132,6 +137,11 @@ class Fact(BaseModel):
 
     @model_validator(mode="after")
     def enforce_grounding_rules(self) -> Self:
+        if self.trust is not None and abs(self.confidence - self.trust.confidence) > 0.001:
+            raise ValueError(
+                f"{self.id}: confidence must equal the evidence-derived trust score "
+                f"({self.trust.confidence}, got {self.confidence})"
+            )
         if self.is_grounded:
             return self
         if self.confidence > UNGROUNDED_CONFIDENCE_CEILING:
@@ -213,10 +223,12 @@ def _carry_verdict(existing: Fact, incoming: Fact) -> Fact:
         result="pass",
     )
     payload = incoming.model_dump()
+    keep_existing_trust = existing.confidence >= incoming.confidence
     payload.update(
         status=FactStatus.VERIFIED,
         verified_by=existing.verified_by,
         confidence=max(existing.confidence, incoming.confidence),
+        trust=existing.trust if keep_existing_trust else incoming.trust,
         provenance=[*incoming.provenance, verdict],
     )
     return Fact.model_validate(payload)

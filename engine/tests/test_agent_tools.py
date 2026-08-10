@@ -7,6 +7,7 @@ import pytest
 from atlas.adapters.base import CheckObservation, DatabaseAdapter
 from atlas.agent import AnalysisSink, build_tools, render_table
 from atlas.facts import FactStatus
+from atlas.policy import Trust
 from atlas.snapshot import Column, ColumnProfile, Snapshot, Table, ValueCount
 
 
@@ -340,7 +341,10 @@ def test_a_distribution_supports_a_claim_about_its_own_column() -> None:
     )
     assert "Recorded" in result
     fact = sink.facts[0]
-    assert fact.confidence == 0.65  # observed, capped there for business meaning
+    assert fact.confidence == 0.84  # strong observed support, below authoritative trust
+    assert fact.trust is not None
+    assert fact.trust.state is Trust.OBSERVED
+    assert fact.trust.factors.coverage == 1.0
     assert sink.evidence.contradictions(fact.id) == []
 
 

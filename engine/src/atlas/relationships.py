@@ -50,7 +50,7 @@ from atlas.evidence import (
     Verdict,
 )
 from atlas.facts import Consequence, Fact, FactStatus, Provenance, ProvenanceKind
-from atlas.policy import Trust, evaluate
+from atlas.policy import Trust, assess
 from atlas.snapshot import Enforcement, Snapshot, Table
 
 logger = logging.getLogger(__name__)
@@ -445,7 +445,7 @@ def as_claims(discovery: Discovery) -> tuple[list[Fact], list[ClaimEvidence]]:
 
     No model wrote these and none could improve them: the sentence is a
     restatement of what the constraint or the check established, and the
-    confidence comes from `policy.evaluate` over that same evidence. They exist
+    confidence comes from `policy.assess` over that same evidence. They exist
     as claims so a relationship is reviewable, supersedable, and readable
     alongside everything else rather than living in a parallel structure.
     """
@@ -471,7 +471,12 @@ def as_claims(discovery: Discovery) -> tuple[list[Fact], list[ClaimEvidence]]:
             relationship=LinkKind.SUPPORTS,
             rationale=relationship.finding[:200],
         )
-        trust, score, reasons = evaluate("join", [(link, record)])
+        assessment = assess("join", [(link, record)])
+        trust, score, reasons = (
+            assessment.state,
+            assessment.confidence,
+            assessment.reasons,
+        )
 
         facts.append(
             Fact(
@@ -483,6 +488,7 @@ def as_claims(discovery: Discovery) -> tuple[list[Fact], list[ClaimEvidence]]:
                     f"{candidate.target_relation}.{targets}. {relationship.finding}"
                 ),
                 confidence=score,
+                trust=assessment,
                 provenance=[
                     Provenance(
                         kind=ProvenanceKind.GROUNDED_CHECK,

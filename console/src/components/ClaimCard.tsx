@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ClaimStatus } from "@/api/types";
+import type { ClaimStatus, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
 import { Key } from "@/components/ReviewQueue";
 import { Badge } from "@/components/StatusBadge";
 import type { QueueItem } from "@/lib/queue";
-import { canVerify, confidenceLabel } from "@/lib/review";
+import { canVerify, confidenceLabel, trustPercent } from "@/lib/review";
 import { useReviewMutation } from "@/store/api";
 import { useAppSelector } from "@/store";
 
@@ -90,12 +90,13 @@ export function ClaimCard({
         {!item.claim.grounded && <Badge tone="generated">AI generated</Badge>}
         <span
           className={`ml-auto rounded-full px-2 py-[2px] text-meta font-medium ${
-            item.claim.confidence < 0.7
+            item.claim.confidence < 0.5
               ? "bg-amber-soft text-amber-strong"
               : "bg-teal-soft text-teal-strong"
           }`}
+          title="Evidence-derived trust score; not a probability"
         >
-          {label} {item.claim.confidence.toFixed(2)}
+          Trust {trustPercent(item.claim.confidence)}/100 · {label}
         </span>
       </header>
 
@@ -127,11 +128,18 @@ export function ClaimCard({
 
         <div>
           <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">
-            {item.claim.confidence < 0.7 ? "Why low" : "What this rests on"}
+            Trust basis
           </p>
           <p className="mt-1.5 text-body text-ink-2">{detail}</p>
         </div>
       </div>
+
+      {item.claim.trust && (
+        <TrustBreakdown
+          factors={item.claim.trust.factors}
+          limitations={item.claim.trust.limitations}
+        />
+      )}
 
       {error && (
         <p className="mt-3 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
@@ -191,6 +199,51 @@ export function ClaimCard({
         )}
       </footer>
     </article>
+  );
+}
+
+function TrustBreakdown({
+  factors,
+  limitations,
+}: {
+  factors: TrustFactors;
+  limitations: string[];
+}) {
+  const entries: [string, number][] = [
+    ["Directness", factors.evidence_directness],
+    ["Authority", factors.authority],
+    ["Coverage", factors.coverage],
+    ["Consistency", factors.consistency],
+    ["Freshness", factors.freshness],
+  ];
+
+  return (
+    <section className="mt-4 border-t border-line pt-3">
+      <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">
+        Trust score factors
+      </p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-5">
+        {entries.map(([name, value]) => (
+          <div key={name} className="rounded-[--radius-control] bg-raised px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2 text-meta text-ink-3">
+              <span>{name}</span>
+              <span className="tabular-nums">{Math.round(value * 100)}</span>
+            </div>
+            <span className="mt-1 block h-1 overflow-hidden rounded-full bg-sunken">
+              <span
+                className="block h-full rounded-full bg-teal"
+                style={{ width: `${Math.round(value * 100)}%` }}
+              />
+            </span>
+          </div>
+        ))}
+      </div>
+      {limitations.length > 0 && (
+        <p className="mt-2 text-meta text-ink-3">
+          <span className="font-semibold">Limits:</span> {limitations.slice(0, 2).join(" · ")}
+        </p>
+      )}
+    </section>
   );
 }
 

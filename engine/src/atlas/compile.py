@@ -13,19 +13,22 @@ from atlas.output import Claim, ColumnOutput, SchemaOutput, TableOutput
 MAX_SAMPLE_VALUES = 8
 
 PREAMBLE = (
-    "Claims carry confidence. `[checked]` means a query ran that could have "
-    "contradicted the claim and did not — on the data present at capture time, which is "
-    "not a guarantee about data you have not seen. `[unverified guess]` means no query "
-    "backed it. Only joins marked `[enforced]` are guaranteed by the database itself.\n\n"
+    "Claims carry an evidence-derived trust score, not a probability or model opinion. "
+    "The score combines evidence directness, authority, coverage, consistency, and "
+    "freshness. A checked claim held on the data present at capture time; only joins "
+    "marked `[enforced]` are guaranteed by the database itself.\n\n"
     "Sample values are filtered by a privacy policy; a withholding reason describes a "
     "column's shape without exposing its contents."
 )
 
 
 def _tag(claim: Claim) -> str:
-    if claim.status is FactStatus.VERIFIED:
-        return "[verified]"
-    return f"[{claim.confidence:.2f} {'checked' if claim.grounded else 'unverified guess'}]"
+    score = round(claim.confidence * 100)
+    state = claim.trust.state.value if claim.trust else (
+        "checked" if claim.grounded else "unsupported"
+    )
+    decision = " · validated" if claim.status is FactStatus.VERIFIED else ""
+    return f"[trust {score}/100 · {state}{decision}]"
 
 
 def _samples(column: ColumnOutput) -> str:

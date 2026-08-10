@@ -56,24 +56,22 @@ export function buildQueue(output: SchemaOutput, filter: Filter = "needs-review"
   };
 }
 
-export type Filter = "needs-review" | "low-confidence" | "all";
+export type Filter = "needs-review" | "weak-trust" | "all";
 
 export function countFor(output: SchemaOutput, filter: Filter): number {
   return buildQueue(output, filter).items.length;
 }
 
 function matches(item: QueueItem, filter: Filter): boolean {
-  if (filter === "low-confidence") return item.claim.confidence < 0.7;
+  if (filter === "weak-trust") return item.claim.confidence < 0.5;
   return true;
 }
 
 /**
- * Consequence first, then least-confident.
+ * Consequence first, then weakest trust score.
  *
- * Confidence ascending rather than descending on purpose: the claims a
- * reviewer can most improve are the ones the evidence supports least, and a
- * queue sorted the other way spends the first hour approving things that were
- * already near-certain.
+ * Review priority and trust are deliberately separate: consequence decides
+ * which mistakes matter first; the evidence-derived trust score breaks ties.
  */
 function byUrgency(a: QueueItem, b: QueueItem): number {
   const weight = WEIGHT[a.claim.consequence] - WEIGHT[b.claim.consequence];

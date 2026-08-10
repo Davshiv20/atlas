@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from atlas.classify import Consequence, classify_column, consequence
 from atlas.evidence import EvidenceStore, Scope, Verdict
 from atlas.facts import Fact, FactStatus, FactStore, ProvenanceKind
+from atlas.policy import TrustAssessment, assess
 from atlas.questions import Question, QuestionStatus
 from atlas.snapshot import Column, Snapshot, Table
 
@@ -27,7 +28,9 @@ NOTE_ASPECTS = ("lifecycle", "quality", "metric")
 
 class Claim(BaseModel):
     text: str
+    # Evidence-derived trust score. This is not a probability.
     confidence: float
+    trust: TrustAssessment | None = None
     status: FactStatus
     grounded: bool
     evidence: str | None = None
@@ -41,6 +44,7 @@ class Claim(BaseModel):
         return cls(
             text=fact.claim,
             confidence=fact.confidence,
+            trust=fact.trust,
             status=fact.status,
             grounded=bool(checks),
             evidence=checks[0].detail.removeprefix("executed: ") if checks else None,
@@ -280,6 +284,33 @@ def _scope_phrase(scope: Scope) -> str:
     return f"complete scan over {rows}" if scope.is_durable else f"sampled from {rows}"
 
 
+def assess_facts(store: FactStore, evidence: EvidenceStore | None) -> FactStore:
+    """Re-score linked claims when output is read.
+
+    Existing workspaces predate factorized trust and otherwise keep showing the
+    old fixed 0.65/0.88 values forever. Re-assessment is derived and non-
+    destructive: the fact store remains the review history, while the output
+    reflects current policy and freshness. Claims with no linked evidence keep
+    their legacy scalar until they are regenerated or grounded.
+    """
+    if evidence is None:
+        return store
+
+    current: list[Fact] = []
+    for fact in store.facts:
+        pairs = evidence.for_claim(fact.id)
+        if not pairs:
+            current.append(fact)
+            continue
+        assessment = assess(fact.aspect, pairs)
+        current.append(
+            fact.model_copy(
+                update={"confidence": assessment.confidence, "trust": assessment}
+            )
+        )
+    return FactStore(facts=current)
+
+
 def build_output(
     snapshot: Snapshot,
     store: FactStore,
@@ -287,8 +318,9 @@ def build_output(
     evidence: EvidenceStore | None = None,
 ) -> SchemaOutput:
     ruled_out = _ruled_out(evidence)
+    facts = assess_facts(store, evidence).facts
     by_subject: dict[str, list[Fact]] = {}
-    for fact in store.facts:
+    for fact in facts:
         by_subject.setdefault(fact.subject, []).append(fact)
 
 
@@ -350,10 +382,10 @@ def build_output(
         schema_name=snapshot.schema_name,
         captured_at=snapshot.extracted_at,
         table_count=len(tables),
-        claim_count=len(store.facts),
+        claim_count=len(facts),
         checked_claim_count=sum(
             1
-            for f in store.facts
+            for f in facts
             if any(p.kind is ProvenanceKind.GROUNDED_CHECK for p in f.provenance)
         ),
         question_count=sum(1 for q in questions if q.status is QuestionStatus.OPEN),

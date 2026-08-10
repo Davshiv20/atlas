@@ -170,8 +170,8 @@ function Ledger({
           <Chip active={filter === "needs-review"} onClick={() => onFilter("needs-review")}>
             Needs review {countFor(output, "needs-review")}
           </Chip>
-          <Chip active={filter === "low-confidence"} onClick={() => onFilter("low-confidence")}>
-            Low conf {countFor(output, "low-confidence")}
+          <Chip active={filter === "weak-trust"} onClick={() => onFilter("weak-trust")}>
+            Weak trust {countFor(output, "weak-trust")}
           </Chip>
           <Chip active={filter === "all"} onClick={() => onFilter("all")}>
             All
@@ -280,14 +280,14 @@ function NextUp({
 }
 
 function Confidence({ value }: { value: number }) {
-  const low = value < 0.7;
+  const low = value < 0.5;
   return (
     <span
       className={`shrink-0 rounded-full px-1.5 text-badge font-semibold tabular-nums ${
         low ? "bg-amber-soft text-amber-strong" : "bg-teal-soft text-teal-strong"
       }`}
     >
-      {value.toFixed(2)}
+      Trust {Math.round(value * 100)}
     </span>
   );
 }

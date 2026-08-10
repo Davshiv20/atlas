@@ -181,7 +181,7 @@ def test_round_trip_through_disk(document, tmp_path) -> None:
 
 
 def test_markdown_leads_each_table_with_grain(document) -> None:
-    assert "**Grain:** One row per customer order. [0.92 checked]" in render_markdown(document)
+    assert "**Grain:** One row per customer order. [trust 92/100 · checked]" in render_markdown(document)
 
 
 def test_markdown_warns_when_grain_is_unknown(document) -> None:
@@ -190,21 +190,23 @@ def test_markdown_warns_when_grain_is_unknown(document) -> None:
 
 def test_markdown_separates_checked_from_guessed(document) -> None:
     text = render_markdown(document)
-    assert "Orders placed through the storefront. [0.75 checked]" in text
-    assert "Order lifecycle state. [0.45 unverified guess]" in text
+    assert "Orders placed through the storefront. [trust 75/100 · checked]" in text
+    assert "Order lifecycle state. [trust 45/100 · unsupported]" in text
 
 
 def test_markdown_marks_enforced_joins(document) -> None:
     assert "`customers(id)` [enforced]" in render_markdown(document)
 
 
-def test_verified_claims_show_no_confidence_number(snapshot) -> None:
-    """A human verdict is categorical; a probability beside it invites the
-    reader to discount a decision already made."""
+def test_validated_claims_keep_their_trust_score(snapshot) -> None:
+    """Validation and trust answer different questions, so show both."""
     verified = fact("orders", "grain", "One row per order.", 0.92)
     verified = verified.model_copy(update={"status": FactStatus.VERIFIED})
     document = build_output(snapshot, FactStore(facts=[verified]), [])
-    assert "**Grain:** One row per order. [verified]" in render_markdown(document)
+    assert (
+        "**Grain:** One row per order. [trust 92/100 · checked · validated]"
+        in render_markdown(document)
+    )
 
 
 def test_markdown_never_leaks_withheld_values(document) -> None:

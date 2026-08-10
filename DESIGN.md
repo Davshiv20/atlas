@@ -1,93 +1,187 @@
-# DESIGN.md: Atlas product website
+# Atlas product-report design
 
-## Source
+## Purpose
+
+This document defines the visual system for
+`product-agent-semantic-context-layer.html`. The artifact is a structured product report
+for reviewers, not a marketing landing page and not the Atlas application UI.
+
+The report must let a product or engineering reviewer understand the thesis, ratify the
+important decisions, inspect implementation details, and navigate a long specification
+without reading it linearly.
+
+## Visual reference
+
 - Reference URL: https://langfuse.com/
 - Capture date: 2026-08-07
-- Evidence: `.firecrawl/langfuse-branding.json`, `.firecrawl/langfuse-screenshot.png`
-- Use: public visual reference for Atlas's own brand. Reuse structural DNA only; do not copy Langfuse trademarks, imagery, or copy.
+- Original evidence: `.firecrawl/langfuse-branding.json` and
+  `.firecrawl/langfuse-screenshot.png` when locally available
+- Rule: reuse structural design DNA only; do not copy Langfuse trademarks, imagery,
+  layout verbatim, or product copy
 
-## Reference Screenshot
-![Full-page screenshot of Langfuse](./.firecrawl/langfuse-screenshot.png)
+Borrow the reference's technical density, off-white palette, sharp borders, compact
+labels, and dashboard-like widgets. Apply them to a document structure rather than a
+website structure.
 
-Use the screenshot as a reference for density, hierarchy, sharp borders, technical diagrams, and restrained product presentation—not as a pixel-copy target.
+## Design character
 
-## Design Summary
-A light, technical, developer-facing product site. It uses an off-white neutral canvas, near-black ink, one electric-blue interaction color, and a fluorescent-yellow highlight for important phrases. Layouts feel like product documentation crossed with an engineering dashboard: square corners, hairline borders, dense labels, compact calls to action, and large product UI demonstrations.
+A technical product specification presented like an internal research report:
 
-## Design Tokens
+- off-white paper and near-black ink;
+- electric blue for navigation and structural emphasis;
+- fluorescent yellow for one consequential phrase or review point;
+- dense tables, diagrams, code blocks, and status chips;
+- sharp corners and hairline borders;
+- minimal shadow;
+- restrained typography;
+- no marketing hero, announcement bar, CTA section, testimonial strip, pricing pattern,
+  or promotional footer.
 
-### Colors
+## Tokens
+
+### Color
+
 - Canvas: `#EDEDE8`
-- Surface: `#F7F7F4`
+- Paper: `#F7F7F4`
 - Raised surface: `#FFFFFF`
 - Ink: `#101113`
-- Muted ink: `#5B5D58`
+- Secondary ink: `#3D3F3B`
+- Muted ink: `#62645F`
+- Faint ink: `#92948D`
 - Hairline: `#CFCFC9`
-- Blue action: `#1863DC`
+- Strong hairline: `#AAA9A2`
+- Blue: `#1863DC`
+- Dark blue: `#104EAD`
+- Blue tint: `#E5EDFB`
 - Yellow highlight: `#F4F542`
 - Positive: `#17735A`
-- Warning: `#A66510`
-- Danger: `#A23D3D`
+- Warning: `#8B5913`
+- Danger: `#9F3636`
 
 ### Typography
-- Display: Inter, 700–800, tight tracking, 64–72px desktop
-- Body/UI: Inter, 400–600
-- Technical labels/code: JetBrains Mono, 400–600
-- No decorative serif. No italic headings.
 
-### Spacing And Layout
-- Base unit: 4px
-- Content width: 1120–1180px
-- Main reading column: 760–900px
-- Section padding: 88–128px desktop, 56–72px mobile
-- Grid gaps: mostly 1px borders; 16–24px internal padding
-- Corners: 2–4px, not pill-heavy
-- Shadows: almost none; borders provide depth
+- Headings and body: Inter, 400–800
+- Technical labels and code: JetBrains Mono, 400–600
+- Document title: 38–62px, tight tracking
+- Section heading: approximately 30px desktop
+- Body: 14px with generous line height
+- Labels and metadata: 8–10px monospace
+- No decorative serif and no italic display headings
 
-## Components
-- Announcement bar: black strip with compact link
-- Navigation: wordmark left, section links center, dark primary CTA right
-- Hero: centered, 2–3 lines, key phrase highlighted yellow
-- Buttons: square 2px corners, dark primary, bordered secondary, optional monospace shortcut chip
-- Product frame: bordered UI demonstration with header rail, side navigation, and main canvas
-- Feature grid: connected bordered cells, not floating cards
-- Technical lists: small monospace labels and visible dividers
-- Trust/status chips: compact, tinted, square-radius
-- FAQ: native `<details>` rows with plus-like disclosure behavior
-- Footer: dense multi-column index with hairline rules
+### Geometry
 
-## Page Patterns
-1. Announcement + compact navigation
-2. Hero with highlighted phrase and two CTAs
-3. Large product UI mockup proving the concept
-4. Continuous-loop explanation
-5. Connected feature grid
-6. Canonical-model / architecture section
-7. Trust and validation section
-8. Agent interfaces and adapters
-9. Security and drift
-10. Roadmap
-11. Final highlighted CTA
-12. FAQ and index footer
+- Desktop sidebar: approximately 248px
+- Main reading measure: approximately 940px
+- Section spacing: 40–54px
+- Base spacing unit: 4px
+- Borders: 1px, with a heavier report-cover rule
+- Corners: 2–4px
+- Avoid floating card shadows; use rules and surface contrast
 
-## Content Style
-- Declarative, technical, and specific
-- Short headings; highlight one important phrase
-- Explain the continuous loop rather than presenting isolated features
-- Avoid invented customer logos, testimonials, or usage metrics
-- Use the user's real product claims and clearly label illustrative examples
+## Document structure
 
-## Agent Build Instructions
-- Keep the page single-file and dependency-free except Google Fonts.
-- Use no JavaScript; rely on CSS and native `<details>`.
-- Build product mockups from CSS/HTML, never by copying Langfuse screenshots.
-- Preserve Atlas content and positioning while adopting the reference's visual grammar.
-- Keep all colors and fonts in tokens.
-- Ensure 320/375/414/768px layouts have no horizontal scroll.
-- Verify text contrast and reduced-motion behavior.
+1. Persistent contents sidebar
+2. Report cover with document type, title, summary, and metadata strip
+3. Executive summary
+4. Decisions or assumptions for reviewers to ratify
+5. Numbered product sections in the same order as the specification
+6. Compact reference tables and diagrams before explanatory prose
+7. Collapsible appendices for lower-priority detail
+8. Small document footer with title and date
 
-## Rerun Inputs
-workflow: firecrawl-website-design-clone
-source_url: https://langfuse.com/
-target_stack: self-contained HTML
-output: DESIGN.md + product-agent-semantic-context-layer.html
+The page should feel printable and coherent without navigation chrome.
+
+## Component vocabulary
+
+### Report cover
+
+A strong top rule, compact eyebrow, document title, one-paragraph summary, and metadata
+strip. It introduces a report; it must not behave like a conversion hero.
+
+### Contents sidebar
+
+Numbered, compact, and sticky on desktop. On smaller screens it becomes a horizontally
+scrollable contents rail. It contains no account, pricing, signup, or promotional links.
+
+### Section header
+
+A two-column row with monospace section number and title. Optional one-sentence lede
+explains what the section decides.
+
+### Callout
+
+Use at most four semantic styles:
+
+- dark: core thesis or north star;
+- blue: architectural rule or example objective;
+- yellow: reviewer decision or consequential warning;
+- neutral: supporting context.
+
+Each callout communicates one concept.
+
+### Data widgets
+
+Use bordered, connected cells for:
+
+- compression funnels;
+- process loops;
+- three-layer architecture;
+- typed-check flow;
+- review-priority formula;
+- context compiler pipeline;
+- evaluation conditions;
+- roadmap phases.
+
+Widgets support the report. They must not turn sections into feature marketing cards.
+
+### Compact table
+
+Use for trust states, workbench surfaces, evaluation conditions, success criteria, and
+product principles. Header rows are near-black with small monospace labels.
+
+### Code card
+
+Near-black panel containing JSON, interfaces, or compiled context. Syntax color is
+restrained and accessible.
+
+### Details disclosure
+
+Use native `<details>/<summary>` for appendices and explanations that would otherwise
+interrupt the main review path. No JavaScript is required.
+
+## Content rules
+
+- Preserve the latest claims in `PRODUCT.md`; do not invent product status or customer
+  evidence.
+- Distinguish current implementation from target product behavior.
+- Lead with decisions, tables, or diagrams rather than prose walls.
+- Keep paragraphs short and place lower-priority detail behind disclosures.
+- Use illustrative quantities only when the product specification labels them as an
+  example or target.
+- Avoid generic marketing language, social proof, and calls to action.
+
+## Responsive and print behavior
+
+- No horizontal page overflow at 320, 375, 414, or 768px.
+- Sidebar becomes a compact top contents rail below desktop width.
+- Multi-column cards and flows collapse without changing reading order.
+- Wide tables may scroll inside their own container.
+- Print mode removes navigation and canvas treatment, uses the full page width, and
+  avoids breaking small widgets where practical.
+- Respect `prefers-reduced-motion`; the report should not depend on animation.
+
+## Build constraints
+
+- One self-contained HTML file.
+- Inline CSS; no external JavaScript.
+- Google Fonts may be loaded from the CDN.
+- No copied screenshots or third-party product imagery in the final report.
+- All colors and typography come from tokens.
+- Native HTML semantics and visible focus states are required.
+
+## Relationship to the console
+
+This design system does not govern `console/`. The application workbench has its own
+interaction and product requirements. Shared brand tokens are acceptable, but report
+components such as the cover and document sidebar should not be copied into the product
+UI without a separate design decision.

@@ -204,12 +204,17 @@ def compile(
 
 @app.command()
 def claims(workspace_name: str = typer.Argument(..., help="Workspace name")) -> None:
-    """Show review status of the claim store."""
-    store = _existing(workspace_name).read_facts()
+    """Show review status with current evidence-derived trust scores."""
+    from atlas.output import assess_facts
+
+    workspace = _existing(workspace_name)
+    store = assess_facts(workspace.read_facts(), workspace.read_evidence())
     pending = store.needing_review()
     typer.echo(f"{len(store.facts)} facts, {len(pending)} awaiting review")
     for fact in pending[:20]:
-        typer.echo(f"  [{fact.confidence:.2f}] {fact.id}: {fact.claim}")
+        typer.echo(
+            f"  [trust {round(fact.confidence * 100)}/100] {fact.id}: {fact.claim}"
+        )
 
 
 if __name__ == "__main__":

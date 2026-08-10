@@ -112,6 +112,60 @@ def test_a_refuted_hypothesis_is_reported_on_the_table_it_was_about() -> None:
     assert ruled[0].scope == "complete scan over 26 rows"
 
 
+def test_legacy_confidence_is_recomputed_from_linked_evidence() -> None:
+    check = JoinCheck(
+        source_relation="engagements",
+        source_fields=["updated_by"],
+        target_relation="users",
+        target_fields=["id"],
+    )
+    record, _ = run_check(
+        _StubAdapter(
+            CheckObservation(
+                check_type="join",
+                observations={"source_rows": 26, "matched_rows": 26, "orphan_rows": 0},
+                complete_scan=True,
+                rows_examined=26,
+                sql="SELECT …",
+            )
+        ),
+        check,
+        database="db",
+    )
+    evidence = EvidenceStore(records=[record])
+    claim_id = "engagements#join#users.updated_by"
+    evidence.link(
+        ClaimEvidence(
+            claim_id=claim_id,
+            evidence_id=record.id,
+            relationship=LinkKind.SUPPORTS,
+            rationale="all references matched",
+        )
+    )
+    legacy = Fact(
+        subject="engagements",
+        aspect="join",
+        discriminator="users.updated_by",
+        claim="engagements.updated_by references users.id.",
+        confidence=0.65,
+        provenance=[
+            Provenance(
+                kind=ProvenanceKind.GROUNDED_CHECK,
+                detail="legacy fixed score",
+                result="pass",
+            )
+        ],
+    )
+
+    output = build_output(_snapshot(), FactStore(facts=[legacy]), [], evidence)
+    emitted = next(t for t in output.tables if t.name == "engagements").joins[0].description
+
+    assert emitted is not None
+    assert emitted.confidence > 0.85
+    assert emitted.trust is not None
+    assert emitted.trust.factors.coverage == 1.0
+
+
 def test_a_failure_a_claim_cites_is_not_reported_as_settled() -> None:
     """A cited failure is an unresolved contradiction shown on the claim.
     Repeating it here would read as a settled negative."""

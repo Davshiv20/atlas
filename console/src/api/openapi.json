@@ -745,120 +745,6 @@
         }
       }
     },
-    "/workspaces/{name}/classes": {
-      "get": {
-        "tags": [
-          "review"
-        ],
-        "summary": "Get Classes",
-        "description": "Column classes, worst error rate first.\n\nReviewing 800 columns individually is not possible; reviewing the twenty\nshapes they fall into is. A class with a high measured error rate is where a\nreviewer's next hour is worth most.",
-        "operationId": "get_classes_workspaces__name__classes_get",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/components/schemas/ColumnClassSummary"
-                    }
-                  },
-                  "title": "Response Get Classes Workspaces  Name  Classes Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/workspaces/{name}/classes/{class_key_}/review": {
-      "post": {
-        "tags": [
-          "review"
-        ],
-        "summary": "Review Class",
-        "description": "Apply one decision to every unsettled claim in a class.\n\nThis is not bulk-approve. The reviewer judged one representative claim and\nthe system records that the rest inherited it \u2014 each member carries\n`applies_to_class`, so the output can say \"inherited\" rather than implying\nevery column was read.",
-        "operationId": "review_class_workspaces__name__classes__class_key___review_post",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          },
-          {
-            "name": "class_key_",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Class Key "
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClassReviewRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Review Class Workspaces  Name  Classes  Class Key   Review Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/workspaces/{name}/claims": {
       "get": {
         "tags": [
@@ -1149,106 +1035,6 @@
         ],
         "title": "AnswerRequest"
       },
-      "ClassReviewRequest": {
-        "properties": {
-          "decision": {
-            "$ref": "#/components/schemas/FactStatus"
-          },
-          "reviewer": {
-            "type": "string",
-            "title": "Reviewer"
-          },
-          "claim": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Claim",
-            "description": "Wording to apply to every member of the class"
-          }
-        },
-        "type": "object",
-        "required": [
-          "decision",
-          "reviewer"
-        ],
-        "title": "ClassReviewRequest"
-      },
-      "ColumnClassSummary": {
-        "properties": {
-          "key": {
-            "type": "string",
-            "title": "Key"
-          },
-          "columns": {
-            "type": "integer",
-            "title": "Columns"
-          },
-          "tables": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Tables"
-          },
-          "example_columns": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Example Columns"
-          },
-          "claims": {
-            "type": "integer",
-            "title": "Claims"
-          },
-          "settled": {
-            "type": "integer",
-            "title": "Settled"
-          },
-          "auto_accepted": {
-            "type": "integer",
-            "title": "Auto Accepted"
-          },
-          "sampled": {
-            "type": "integer",
-            "title": "Sampled"
-          },
-          "rejected": {
-            "type": "integer",
-            "title": "Rejected"
-          },
-          "error_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Rate"
-          }
-        },
-        "type": "object",
-        "required": [
-          "key",
-          "columns",
-          "tables",
-          "example_columns",
-          "claims",
-          "settled",
-          "auto_accepted",
-          "sampled",
-          "rejected"
-        ],
-        "title": "ColumnClassSummary",
-        "description": "A group of columns a reviewer would judge identically."
-      },
       "ConnectionHealth": {
         "properties": {
           "state": {
@@ -1403,6 +1189,16 @@
             "minimum": 0.0,
             "title": "Confidence"
           },
+          "trust": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrustAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "provenance": {
             "items": {
               "$ref": "#/components/schemas/Provenance"
@@ -1451,17 +1247,6 @@
           "consequence": {
             "$ref": "#/components/schemas/Consequence",
             "default": "high"
-          },
-          "applies_to_class": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applies To Class"
           },
           "id": {
             "type": "string",
@@ -1890,6 +1675,121 @@
         ],
         "title": "SourceStatus",
         "description": "A declared source, whether its variable is populated, and whether anyone\nhas managed to connect with it.\n\nNever carries the URL: this endpoint is unauthenticated, and the registry\nexists precisely so credentials do not travel through it."
+      },
+      "Trust": {
+        "type": "string",
+        "enum": [
+          "unsupported",
+          "signal",
+          "observed",
+          "verified",
+          "enforced",
+          "authoritative",
+          "contradicted"
+        ],
+        "title": "Trust",
+        "description": "What established the claim, not how important the claim is."
+      },
+      "TrustAssessment": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/Trust"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "factors": {
+            "$ref": "#/components/schemas/TrustFactors"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          },
+          "band": {
+            "$ref": "#/components/schemas/TrustBand",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "confidence",
+          "factors",
+          "band"
+        ],
+        "title": "TrustAssessment",
+        "description": "Why a claim has its confidence score.\n\nStored with a claim so API clients do not have to reverse-engineer a number\nfrom prose provenance. `confidence` remains duplicated on `Fact` for\nbackwards compatibility and queue ordering; model validation keeps the two\nequal for newly assessed claims."
+      },
+      "TrustBand": {
+        "type": "string",
+        "enum": [
+          "unsupported",
+          "weak_signals",
+          "plausible",
+          "strongly_supported",
+          "highly_trusted",
+          "authoritative_or_enforced",
+          "conflicted"
+        ],
+        "title": "TrustBand",
+        "description": "Human interpretation of a score; intentionally broader than a decimal."
+      },
+      "TrustFactors": {
+        "properties": {
+          "evidence_directness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Evidence Directness"
+          },
+          "authority": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Authority"
+          },
+          "coverage": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Coverage"
+          },
+          "consistency": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Consistency"
+          },
+          "freshness": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Freshness"
+          }
+        },
+        "type": "object",
+        "required": [
+          "evidence_directness",
+          "authority",
+          "coverage",
+          "consistency",
+          "freshness"
+        ],
+        "title": "TrustFactors",
+        "description": "Inspectable inputs to the trust score, each normalized to 0..1."
       },
       "ValidationError": {
         "properties": {

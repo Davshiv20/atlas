@@ -1,98 +1,144 @@
-# atlas
+# Atlas
 
-Generates an agent-ready business-context catalogue from an unfamiliar database,
-where every non-physical claim is either grounded by an executed check or
-flagged for a human.
+Atlas is a semantic context layer for AI agents over databases the AI team does not own.
+It extracts an unfamiliar source, records physical evidence separately from semantic
+inference, attempts to falsify generated claims, sends consequential ambiguity to a
+human, and emits a compact semantic view.
 
+The target product loop is:
+
+```text
+Connect → infer → compress → validate → serve → observe → improve
 ```
+
+See [`PRODUCT.md`](PRODUCT.md) for the product definition. The current implementation
+covers the PostgreSQL source-understanding, claim-generation, evidence, and review
+foundations; objective-driven compression, the task context compiler, drift, and the
+learning loop are still to be built.
+
+## Repository
+
+```text
 atlas/
-├── engine/     Python — extraction, profiling, relationship discovery, the
-│               analysis agent, the emitted semantic view, HTTP API
-└── console/    React + TypeScript — the review workbench
+├── engine/     Python + FastAPI — adapters, extraction, profiling, checks,
+│               claims, evidence, review APIs, and semantic-view generation
+├── console/    React + TypeScript — source setup and semantic review workbench
+└── PRODUCT.md  product direction, MVP scope, and phased roadmap
 ```
 
-Two packages because they have different release cadences and different
-reviewers. They are coupled by exactly one thing: the engine's OpenAPI schema,
-from which the console's types are generated (`make types`). No shared source
-package, so neither can quietly reach into the other's internals.
+The packages communicate through the engine's OpenAPI contract. The console must not
+import engine internals or maintain an independent interpretation of API models.
+
+## Current capabilities
+
+- PostgreSQL extraction through a `DatabaseAdapter` port.
+- Canonical physical snapshots containing tables, fields, keys, relationships, and
+  privacy-safe profiles.
+- Typed grain, join, distribution, nullability, and ordering checks.
+- Structured evidence with assertion, observation, scope, verdict, limitations,
+  freshness, and query hash.
+- Atomic semantic claims with provenance, grounding rules, and factorized confidence as an evidence-derived trust score.
+- Deterministic relationship discovery from constraints and schema conventions.
+- Human review for claims and questions that database evidence cannot settle.
+- A review console with Sources, Map, Review, and Questions surfaces.
+- A derived semantic view for agent consumption.
+
+Snowflake appears in the source model and UI as the next adapter, but the driver and
+`SnowflakeAdapter` are not implemented yet. It is not currently a supported runtime
+source.
 
 ## Quick start
 
-```bash
-make install                          # engine + console dependencies
-cp engine/.env.example engine/.env    # OPENROUTER_API_KEY
-
-make dev                              # both servers; Ctrl-C stops both
-make check                            # lint, tests, typecheck, build
-```
-
-Databases are added from the console (Sources), not from `.env` — the
-connection string is stored by the engine and tested before anything runs.
-
-## Deploying
+Requirements: Python 3.12+, `uv`, Node.js 22+, and npm.
 
 ```bash
-make image        # multi-stage: the console is built in, only its output ships
-make image-run    # one origin on :8000, workspace persisted in ./data
+make install
+cp engine/.env.example engine/.env
+
+make dev       # engine on :8000, console on :5173
+make check     # lint, engine tests, console typecheck, production build
 ```
 
-Development runs two origins — Vite serves the console and proxies `/api` to
-the engine. The image runs one: the console is built in a Node stage, the
-artifact is copied into the Python image, and the engine mounts it at `/`.
-No Node in the shipped image, and no CORS to configure.
+Add a PostgreSQL source from the console's **Sources** view. Atlas stores UI-managed
+credentials in `engine/.secrets.env`, which is gitignored. For headless use, provide a
+connection URL through the source's configured environment variable or
+`ATLAS_DATABASE_URL`.
 
-The mount is registered after every router, because a mount at `/` matches
-everything. `/data` is the only writable path — catalogues, the job database
-and UI-managed credentials all live there, so it is what needs a volume.
+Always use a database role with `SELECT` and nothing else.
 
-## direnv
-
-Three `.envrc` files — root, `engine/`, `console/`. The package files
-`source_up` the root, so shared values live in one place.
+## Development commands
 
 ```bash
-direnv allow . && direnv allow engine && direnv allow console
+make engine-dev
+make console-dev
+make engine-test
+make engine-lint
+make console-typecheck
+make console-build
+make types
 ```
 
-Run that once, and again whenever an `.envrc` changes — direnv refuses to
-execute a file it has not been shown, which is the point of it.
+`make types` refreshes `console/src/api/openapi.json`. The current TypeScript API models
+are maintained beside that schema; fully automated OpenAPI-to-TypeScript generation is
+still pending.
 
-With direnv active, `cd engine` puts `.venv/bin` on PATH and loads `.env`;
-`cd console` puts `node_modules/.bin` on PATH. So `pytest`, `atlas`, `uvicorn`,
-`vite`, and `tsc` all run without a `uv run` or `npx` prefix. The Makefile keeps
-those prefixes so it works with or without direnv.
+## Deployment
 
-Machine-specific overrides go in `.envrc.local` (gitignored — see
-`.envrc.local.example`). The `.envrc` files themselves are tracked: they are how
-the project is set up, not a personal preference.
+```bash
+make image
+make image-run
+```
 
-## Why it is built this way
+The production image builds the console and serves it from FastAPI on one origin.
+Runtime state and UI-managed credentials live under `/data`; mount it as a persistent
+volume.
 
-Pointing an LLM at `information_schema` produces fluent, confident, wrong
-descriptions that a reviewer rubber-stamps because nothing contradicts them.
-Three structural defences:
+## Current persistence
 
-- **Layer separation.** The physical snapshot is extracted and measured only —
-  no inference ever writes into it. Claims are assertions *about* it, each
-  carrying provenance and a review verdict.
-- **Grounding before review.** A claim reaches a human with a check that could
-  have falsified it already executed, and the result shown alongside. Ungrounded
-  claims are capped below the verification threshold — enforced in the model,
-  not by convention.
-- **Evidence relevance.** A cited query must be capable of supporting the claim,
-  not merely have run. A row sample grounds nothing.
+Workspace state is currently file-backed under `ATLAS_OUTPUT_DIR`:
 
-- **Relationships are never inferred by the model.** They are derived from
-  declared constraints and settled by join checks before analysis starts, so the
-  agent spends its budget on meaning rather than on rediscovering foreign keys.
+```text
+<workspace>/snapshot.yaml
+<workspace>/facts.yaml
+<workspace>/evidence.yaml
+<workspace>/questions.yaml
+<workspace>/output.yaml
+```
 
-Without query logs the model's most valuable output is **questions, not
-answers**: *"`process_id_ref` holds `P1`, `PR-02`, `P001`, `Inc-1` — one
-identifier space or several?"* costs five seconds to answer and cannot be
-inferred from the schema at any effort.
+This is inspectable and useful during product development, but it is not the intended
+multi-user storage model. The next persistence step is an Atlas-owned PostgreSQL
+control-plane database behind a `MetadataRepository` port. YAML should then become an
+export/archive format rather than the source of truth.
 
-Answering one is the only thing that lifts a claim about business meaning above
-what data alone can establish — no query settles what a column means to the
-organisation.
+A stored snapshot can exist while its source is disconnected. The console must treat
+connection health and snapshot availability as separate states.
 
-See `PRODUCT.md` for the full product definition.
+## Architectural rules
+
+1. **Observed facts and semantic inference remain separate.** Extraction never writes
+   generated meaning into the physical snapshot.
+2. **The agent does not receive a generic SQL tool.** It proposes typed checks; Atlas
+   compiles and executes database-specific SQL and computes the verdict.
+3. **Evidence must be relevant and falsifiable.** A query that merely ran does not
+   ground a claim.
+4. **Relationships are settled structurally.** Declared constraints are used directly;
+   unenforced or inferred candidates require coverage checks.
+5. **Unknown remains unknown.** Business meaning that data cannot establish becomes a
+   focused human question.
+6. **Human attention is spent on consequential pivots.** The goal is not to approve
+   every generated field description.
+7. **Task context is smaller than the semantic model.** Multiple agents should reuse a
+   shared semantic model while receiving objective-specific context views.
+
+## Security defaults
+
+- Read-only source credentials.
+- No writes to customer databases.
+- Strict sample policy by default.
+- Sensitive, opaque, free-text, and high-cardinality values withheld from model input.
+- Typed check execution instead of arbitrary model-authored SQL.
+- Statement timeouts and bounded result sizes.
+- Secrets excluded from Git and API responses.
+
+These controls supplement database permissions; they do not replace a properly
+restricted source role.

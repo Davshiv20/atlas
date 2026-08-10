@@ -27,7 +27,7 @@ from atlas.adapters.registry import create_adapter
 from atlas.answers import record_answer
 from atlas.facts import Consequence, Fact, FactStatus, FactStore
 from atlas.jobs import Job, JobProgress, ProgressReporter, get_registry
-from atlas.output import build_output
+from atlas.output import assess_facts, build_output
 from atlas.questions import Question, QuestionLog
 from atlas.secrets import clear_secret, has_secret, load_into_environment, set_secret
 from atlas.semantic_view import build_semantic_view, render_yaml
@@ -683,12 +683,14 @@ def dismiss_question(name: str, question_id: str, request: AnswerRequest) -> dic
 def get_claims(name: str, status: FactStatus | None = None) -> dict:
     """Claims, highest-impact first: least certain at the top, since a claim
     nobody doubts is not worth a reviewer's attention."""
-    facts = _existing(name).read_facts().facts
+    workspace = _existing(name)
+    facts = assess_facts(workspace.read_facts(), workspace.read_evidence()).facts
     if status:
         facts = [f for f in facts if f.status is status]
 
-    # Consequence outranks confidence: a critical claim the model was sure about
-    # still matters more than a routine one it doubted.
+    # Consequence outranks confidence: a highly trusted critical claim still
+    # matters more than a weakly supported routine one. Confidence is evidence-
+    # derived here, never the model's opinion of itself.
     order = {Consequence.CRITICAL: 0, Consequence.HIGH: 1, Consequence.ROUTINE: 2}
     ranked = sorted(facts, key=lambda f: (order[f.consequence], f.confidence))
     return {"count": len(ranked), "claims": [f.model_dump(mode="json") for f in ranked]}

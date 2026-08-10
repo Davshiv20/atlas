@@ -1,55 +1,123 @@
-# console
+# Atlas console
 
-The review workbench: the interface where a human validates generated claims.
-Structure only — no components yet, and **no framework chosen**.
+The console is the semantic review workbench for Atlas. It is a client-rendered React
+application built with TypeScript, Vite, Tailwind CSS, Redux Toolkit, and RTK Query.
 
-## Why the framework is not chosen here
+It is not a public marketing surface and it is not intended to be a generic database
+catalogue or ER-diagram tool. Its job is to help a reviewer resolve consequential
+semantic uncertainty efficiently.
 
-It is a real decision with real consequences for this app, and it belongs to
-whoever will maintain it. The shape of the work, to inform the choice:
-
-- Mostly a **queue UI** — a prioritized list, keyboard-driven approve / reject /
-  edit, evidence shown beside each claim. Throughput for the reviewer is the
-  product metric, so keyboard handling and optimistic updates matter more than
-  routing or SEO.
-- **Long-running jobs** — analysis is minutes per table. Needs polling or SSE
-  against `GET /jobs/{id}`, and a UI that survives a refresh mid-run.
-- **No public surface** — internal tool behind auth. SSR and SEO are irrelevant.
-
-That profile points at a client-rendered SPA (Vite + React or Svelte) over a
-meta-framework. Not a decision made here.
-
-## Layout
-
-```
-src/
-├── api/          generated client + types from the engine's OpenAPI schema
-├── routes/       one per surface: workspaces, catalogue, review queue, jobs
-└── components/   shared UI
-```
-
-## Types come from the engine
-
-Do not hand-write request or response types. The engine's OpenAPI schema is the
-contract:
+## Run locally
 
 ```bash
-make types    # from the repo root
+npm install
+npm run dev
 ```
 
-Then generate TypeScript from `src/api/openapi.json` with `openapi-typescript`
-(or the equivalent for the chosen stack). Hand-written types drift silently; the
-first symptom is a reviewer approving a claim that never saved.
+From the repository root:
 
-## The surfaces that matter
+```bash
+make console-dev
+make console-typecheck
+make console-build
+```
 
-1. **Review queue** — least-confident claims first, evidence and any
-   contradicting result shown inline. This is the product.
-2. **Catalogue** — browse `GET /workspaces/{name}/output`.
-3. **Questions** — answer what no query can settle.
-4. **Jobs** — progress for extract and analyze runs.
+Vite proxies `/api` to the FastAPI engine during development. The production Docker
+image builds the console and serves the static output from FastAPI on the same origin.
 
-One API behaviour to design around: verifying an ungrounded claim returns
-**409**, not 200. That is deliberate — it is the rule that stops a confident
-guess being promoted by a distracted reviewer. Surface the message; do not
-retry.
+## Current surfaces
+
+### Sources
+
+Create a declared source, store or remove its credentials, test the connection, and
+start extraction. Connection health and stored snapshot availability are separate
+concepts, although the UI still needs clearer cached/offline labelling.
+
+PostgreSQL is operational. Snowflake is visible as the next adapter but is not yet
+implemented by the engine and should not be treated as supported.
+
+### Map
+
+Browse the extracted physical schema and mechanically established relationships. This
+is an inspection surface, not the primary validation workflow.
+
+### Review
+
+Review generated claims in consequence-aware order. Each claim exposes its proposal,
+evidence-derived confidence, trust-state and factor breakdown, provenance, evidence, and
+current decision. Confidence is a trust score—not model certainty or a probability.
+Consequence remains separate and drives review priority. The engine rejects attempts to
+verify claims that lack sufficient grounding.
+
+The long-term review model is risk-based: business pivots and representative cases,
+not approval of every generated field description.
+
+### Questions
+
+Answer or dismiss focused questions whose business meaning cannot be established from
+database evidence. Human answers are preserved as semantic decisions rather than being
+folded silently into generated prose.
+
+### Semantic view
+
+Preview the derived view intended for agents. It keeps pending or excluded meaning
+visible and separates mechanically established relationships from generated semantic
+descriptions.
+
+## Source structure
+
+```text
+src/
+├── api/          OpenAPI document, API types, and error handling
+├── components/   Sources, schema map, review queue, questions, semantic preview
+├── lib/          Queue, layout, and review helpers
+├── store/        Redux store, RTK Query API, and UI state
+├── App.tsx       Top-level surface and job coordination
+└── index.css     Tailwind theme and shared visual rules
+```
+
+## API contract
+
+The engine's OpenAPI schema is the source contract:
+
+```bash
+make types
+```
+
+This refreshes `src/api/openapi.json`. Fully automated generation of the TypeScript
+models from OpenAPI is still pending; do not change an API response without updating and
+checking the console contract.
+
+## Long-running jobs
+
+Extraction and analysis run in the engine. The console:
+
+- adopts jobs started by another tab or the CLI;
+- polls only while a job is active;
+- refreshes output as completed tables are persisted;
+- preserves a visible final success or failure state.
+
+A browser tab does not own a job, and refreshing the page must not make active work look
+idle.
+
+## Product direction
+
+The current console remains table- and claim-oriented. The target workbench described in
+[`../PRODUCT.md`](../PRODUCT.md) adds:
+
+- objective-specific relevant domain maps;
+- first-class semantic entities and business concepts;
+- ranked high-impact ambiguity;
+- review budgets and representative-case validation;
+- agent-question previews using `get_context_for_question()`;
+- capability-level readiness rather than “percentage of fields approved”;
+- drift and agent-failure feedback.
+
+## Interaction rules
+
+- Observed facts and inferred meaning must look different.
+- Unknown, stale, and conflicting meaning must stay visible.
+- Never imply that inherited class review means every field was individually inspected.
+- Surface 409 grounding errors; do not retry them automatically.
+- Keep review actions keyboard-accessible.
+- Avoid exposing credentials or raw sensitive values in browser state.

@@ -312,6 +312,26 @@ A semantic claim is an explicit interpretation derived from evidence.
 
 Claims should be atomic, reviewable, versionable, and attributable.
 
+### Confidence as a trust score
+
+Confidence remains part of every claim, but it is an evidence-derived trust score—not a statistical probability and never the model's opinion of its own correctness.
+
+The score should vary within a trust state according to:
+
+- evidence directness;
+- evidence authority;
+- data coverage;
+- consistency across supporting and contradicting observations;
+- freshness.
+
+The score must remain explainable through its factor breakdown, reasons, and limitations. Trust state, confidence, and review priority answer different questions:
+
+```text
+State: What kind of evidence established this claim?
+Confidence: How strong is the evidence-derived case?
+Review priority: How consequential would it be to get this wrong?
+```
+
 ## 10. Trust States
 
 Avoid a simple approved / unapproved model.
@@ -420,7 +440,7 @@ Humans should review only high-impact ambiguity.
 
 ### Review priority
 
-A claim's priority can be based on:
+A claim's priority is separate from its confidence/trust score and can be based on:
 
 ```text
 uncertainty
