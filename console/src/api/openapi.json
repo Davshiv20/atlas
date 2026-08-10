@@ -1,0 +1,1936 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "atlas",
+    "summary": "Grounded schema catalogue generation for unfamiliar databases.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "summary": "Config",
+        "description": "Effective configuration. Secrets are reported as present or absent only.",
+        "operationId": "config_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Config Config Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources": {
+      "get": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "List Sources",
+        "operationId": "list_sources_sources_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/SourceStatus"
+                    },
+                    "type": "array"
+                  },
+                  "type": "object",
+                  "title": "Response List Sources Sources Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Create Source",
+        "operationId": "create_source_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Source"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/{source_id}/credentials": {
+      "put": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Set Credentials",
+        "description": "Store the connection string and immediately re-probe.\n\nWriting it also sets it in this process's environment, so there is no\nrestart between saving a credential and finding out whether it works.",
+        "operationId": "set_credentials_sources__source_id__credentials_put",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionHealth"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Forget Credentials",
+        "operationId": "forget_credentials_sources__source_id__credentials_delete",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/{source_id}": {
+      "delete": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Delete Source",
+        "operationId": "delete_source_sources__source_id__delete",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sources/{source_id}/test": {
+      "post": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Test Source",
+        "description": "Connect and report what came back.\n\nRuns inline rather than as a job: two queries, and a setup form needs the\nanswer before the user moves on.",
+        "operationId": "test_source_sources__source_id__test_post",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionHealth"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces": {
+      "get": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "List Workspaces",
+        "operationId": "list_workspaces_workspaces_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Workspaces Workspaces Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/extract": {
+      "post": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Extract",
+        "description": "Capture the physical layer. Deterministic; no model involved.",
+        "operationId": "extract_workspaces__name__extract_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtractRequest",
+                "default": {
+                  "profile": true
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/analyze": {
+      "post": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Analyze",
+        "description": "Run the analysis agent. Minutes per table \u2014 always poll the job.",
+        "operationId": "analyze_workspaces__name__analyze_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalyzeRequest",
+                "default": {
+                  "regenerate": false
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/compile": {
+      "post": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Compile Output",
+        "description": "Rebuild output.yaml from the stored snapshot and claims. Fast; inline.",
+        "operationId": "compile_output_workspaces__name__compile_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Compile Output Workspaces  Name  Compile Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/output": {
+      "get": {
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "Get Output",
+        "description": "Built on read, never served from the stored file.\n\nOutput is derived from the snapshot and the claims. Serving a cached copy\nmeans a reviewer approves a claim and the catalogue still shows it as\ngenerated \u2014 the two stores disagree and the UI is the one that looks broken.\n`compile` still writes output.yaml, but as an export, not a source.",
+        "operationId": "get_output_workspaces__name__output_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Output Workspaces  Name  Output Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/semantic-view": {
+      "get": {
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "Get Semantic View",
+        "description": "The emitted view \u2014 what an agent would actually be given.\n\nDistinct from `/output`, which is the catalogue: every claim with its\nevidence, confidence and review state. This is only what survived review,\nphrased for something writing SQL. Both the structured form and the\nrendered YAML are returned, because the console shows the second and an\nagent consumes the first.",
+        "operationId": "get_semantic_view_workspaces__name__semantic_view_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "table",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Table"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Semantic View Workspaces  Name  Semantic View Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/questions": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Get Questions",
+        "operationId": "get_questions_workspaces__name__questions_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/Question"
+                    }
+                  },
+                  "title": "Response Get Questions Workspaces  Name  Questions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/questions/{question_id}/answer": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Answer Question",
+        "description": "Settle a question, and let the answer count as evidence.\n\nThis is the only path that lifts a business claim past the OBSERVED\nceiling. `ClaimPolicy` has always allowed it for a human decision; until\nthis endpoint existed nothing could produce one, so every semantics claim\nin the catalogue sat at 0.65 with no mechanism able to move it.",
+        "operationId": "answer_question_workspaces__name__questions__question_id__answer_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Question Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Answer Question Workspaces  Name  Questions  Question Id  Answer Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/questions/{question_id}/dismiss": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Dismiss Question",
+        "description": "Set a question aside without answering it.\n\nNot the same as answering: nothing is established, no claim moves, and no\nevidence is recorded. It only stops the question being asked again \u2014 the\ncolumn is dead, the distinction does not matter here, or nobody knows.",
+        "operationId": "dismiss_question_workspaces__name__questions__question_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "question_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Question Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Dismiss Question Workspaces  Name  Questions  Question Id  Dismiss Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/classes": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Get Classes",
+        "description": "Column classes, worst error rate first.\n\nReviewing 800 columns individually is not possible; reviewing the twenty\nshapes they fall into is. A class with a high measured error rate is where a\nreviewer's next hour is worth most.",
+        "operationId": "get_classes_workspaces__name__classes_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ColumnClassSummary"
+                    }
+                  },
+                  "title": "Response Get Classes Workspaces  Name  Classes Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/classes/{class_key_}/review": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Review Class",
+        "description": "Apply one decision to every unsettled claim in a class.\n\nThis is not bulk-approve. The reviewer judged one representative claim and\nthe system records that the rest inherited it \u2014 each member carries\n`applies_to_class`, so the output can say \"inherited\" rather than implying\nevery column was read.",
+        "operationId": "review_class_workspaces__name__classes__class_key___review_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "class_key_",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Class Key "
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Review Class Workspaces  Name  Classes  Class Key   Review Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/claims": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Get Claims",
+        "description": "Claims, highest-impact first: least certain at the top, since a claim\nnobody doubts is not worth a reviewer's attention.",
+        "operationId": "get_claims_workspaces__name__claims_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FactStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Claims Workspaces  Name  Claims Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}/claims/{claim_id}/review": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Review Claim",
+        "description": "Record a human verdict.\n\nVerifying an ungrounded claim is refused: the model invariant forbids it,\nand surfacing that as a 409 is the point \u2014 it is the rule that stops a\nconfident guess from being promoted to fact by a distracted reviewer.",
+        "operationId": "review_claim_workspaces__name__claims__claim_id__review_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "claim_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Claim Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fact"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "Get Job",
+        "operationId": "get_job_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "summary": "List Jobs",
+        "operationId": "list_jobs_jobs_get",
+        "parameters": [
+          {
+            "name": "workspace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Jobs Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalyzeRequest": {
+        "properties": {
+          "database_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Url"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 500.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit",
+            "description": "How many tables; null means all remaining"
+          },
+          "tables": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tables",
+            "description": "Specific tables. Overrides limit and ranking."
+          },
+          "regenerate": {
+            "type": "boolean",
+            "title": "Regenerate",
+            "description": "Re-analyze tables that already have claims, discarding their previous claims and evidence rather than merging. Scoped to the tables in this run. Off by default: regeneration resets human verdicts on reworded claims and drops the observations behind them.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "AnalyzeRequest"
+      },
+      "AnswerRequest": {
+        "properties": {
+          "answer": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Answer"
+          },
+          "reviewer": {
+            "type": "string",
+            "title": "Reviewer",
+            "default": "unknown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "answer"
+        ],
+        "title": "AnswerRequest"
+      },
+      "ClassReviewRequest": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/FactStatus"
+          },
+          "reviewer": {
+            "type": "string",
+            "title": "Reviewer"
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim",
+            "description": "Wording to apply to every member of the class"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "reviewer"
+        ],
+        "title": "ClassReviewRequest"
+      },
+      "ColumnClassSummary": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "columns": {
+            "type": "integer",
+            "title": "Columns"
+          },
+          "tables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tables"
+          },
+          "example_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Example Columns"
+          },
+          "claims": {
+            "type": "integer",
+            "title": "Claims"
+          },
+          "settled": {
+            "type": "integer",
+            "title": "Settled"
+          },
+          "auto_accepted": {
+            "type": "integer",
+            "title": "Auto Accepted"
+          },
+          "sampled": {
+            "type": "integer",
+            "title": "Sampled"
+          },
+          "rejected": {
+            "type": "integer",
+            "title": "Rejected"
+          },
+          "error_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "columns",
+          "tables",
+          "example_columns",
+          "claims",
+          "settled",
+          "auto_accepted",
+          "sampled",
+          "rejected"
+        ],
+        "title": "ColumnClassSummary",
+        "description": "A group of columns a reviewer would judge identically."
+      },
+      "ConnectionHealth": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "connected",
+              "failed"
+            ],
+            "title": "State",
+            "default": "unknown"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "server_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Version"
+          },
+          "table_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Count"
+          }
+        },
+        "type": "object",
+        "title": "ConnectionHealth",
+        "description": "The result of actually connecting, as distinct from being configured.\n\n`configured` only means the environment variable holds something. A wrong\npassword, an unreachable host, or a schema that does not exist all leave it\ntrue \u2014 so a card reading \"credentials found\" was claiming more than anyone\nhad checked."
+      },
+      "Consequence": {
+        "type": "string",
+        "enum": [
+          "critical",
+          "high",
+          "routine"
+        ],
+        "title": "Consequence",
+        "description": "What breaks downstream if the claim is wrong."
+      },
+      "CredentialRequest": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Url",
+            "description": "Full SQLAlchemy connection URL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "CredentialRequest"
+      },
+      "ExtractRequest": {
+        "properties": {
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id",
+            "description": "A source declared in sources.yaml"
+          },
+          "database_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Url",
+            "description": "Direct URL. Falls back to ATLAS_DATABASE_URL."
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name",
+            "description": "Overrides the source's namespace"
+          },
+          "profile": {
+            "type": "boolean",
+            "title": "Profile",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "ExtractRequest"
+      },
+      "Fact": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "aspect": {
+            "type": "string",
+            "title": "Aspect"
+          },
+          "claim": {
+            "type": "string",
+            "title": "Claim"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence"
+          },
+          "provenance": {
+            "items": {
+              "$ref": "#/components/schemas/Provenance"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Provenance"
+          },
+          "status": {
+            "$ref": "#/components/schemas/FactStatus",
+            "default": "unverified"
+          },
+          "verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified By"
+          },
+          "supersedes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supersedes"
+          },
+          "discriminator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discriminator"
+          },
+          "consequence": {
+            "$ref": "#/components/schemas/Consequence",
+            "default": "high"
+          },
+          "applies_to_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applies To Class"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "aspect",
+          "claim",
+          "confidence",
+          "provenance",
+          "id"
+        ],
+        "title": "Fact"
+      },
+      "FactStatus": {
+        "type": "string",
+        "enum": [
+          "unverified",
+          "auto_accepted",
+          "verified",
+          "rejected"
+        ],
+        "title": "FactStatus"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Job": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "workspace": {
+            "type": "string",
+            "title": "Workspace"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus",
+            "default": "pending"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobProgress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "workspace"
+        ],
+        "title": "Job"
+      },
+      "JobProgress": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "tables": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tables"
+          },
+          "completed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Completed"
+          },
+          "current": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Current"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "JobProgress",
+        "description": "What a running job is doing, in a shape the console can render.\n\nA sentence alone was not enough: the analysis spends minutes per table, so\nthe reviewer needs to know which table is under way and how much of the run\nis left, not just that something is happening."
+      },
+      "JobStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "failed",
+          "interrupted"
+        ],
+        "title": "JobStatus"
+      },
+      "Provenance": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ProvenanceKind"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "inconclusive"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "detail"
+        ],
+        "title": "Provenance"
+      },
+      "ProvenanceKind": {
+        "type": "string",
+        "enum": [
+          "grounded_check",
+          "llm_inference",
+          "human"
+        ],
+        "title": "ProvenanceKind"
+      },
+      "Question": {
+        "properties": {
+          "subject": {
+            "type": "string",
+            "title": "Subject"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table",
+            "default": ""
+          },
+          "aspect": {
+            "type": "string",
+            "title": "Aspect",
+            "default": "semantics"
+          },
+          "status": {
+            "$ref": "#/components/schemas/QuestionStatus",
+            "default": "open"
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answer"
+          },
+          "answered_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered By"
+          },
+          "answered_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Answered At"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable across runs, so an answer survives re-analysis.\n\nKeyed on what is being asked rather than on when: re-analysing a table\nasks the same question again, and a reviewer should not be made to\nanswer it twice because the wording of the evidence changed.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "subject",
+          "question",
+          "evidence",
+          "id"
+        ],
+        "title": "Question"
+      },
+      "QuestionStatus": {
+        "type": "string",
+        "enum": [
+          "open",
+          "answered",
+          "dismissed"
+        ],
+        "title": "QuestionStatus"
+      },
+      "ReviewRequest": {
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/FactStatus"
+          },
+          "reviewer": {
+            "type": "string",
+            "title": "Reviewer"
+          },
+          "claim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Claim",
+            "description": "Corrected wording, if editing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "decision",
+          "reviewer"
+        ],
+        "title": "ReviewRequest"
+      },
+      "Source": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "url_env": {
+            "type": "string",
+            "title": "Url Env"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "default": "public"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "adapter",
+          "url_env"
+        ],
+        "title": "Source"
+      },
+      "SourceStatus": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "adapter": {
+            "type": "string",
+            "title": "Adapter"
+          },
+          "url_env": {
+            "type": "string",
+            "title": "Url Env"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "managed": {
+            "type": "boolean",
+            "title": "Managed",
+            "default": false
+          },
+          "health": {
+            "$ref": "#/components/schemas/ConnectionHealth",
+            "default": {
+              "state": "unknown"
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "adapter",
+          "url_env",
+          "namespace",
+          "configured"
+        ],
+        "title": "SourceStatus",
+        "description": "A declared source, whether its variable is populated, and whether anyone\nhas managed to connect with it.\n\nNever carries the URL: this endpoint is unauthenticated, and the registry\nexists precisely so credentials do not travel through it."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

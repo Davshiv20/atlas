@@ -1,0 +1,28 @@
+# Python runtime and build artefacts
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Generated catalogues.
+# These carry sample values read from real customer databases. Filtered by the
+# redaction policy, but still customer data — decide deliberately before
+# tracking any of it.
+out/
+out_evals/
+
+# uv.lock is deliberately NOT ignored: atlas is an application, so the lock
+# file is what makes a deploy reproducible.
+
+# UI-managed connection strings — plaintext, never commit.
+.secrets.env

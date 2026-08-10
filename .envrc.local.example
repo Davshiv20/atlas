@@ -1,0 +1,4 @@
+# Copy to .envrc.local for machine-specific overrides. Never committed.
+# Example: run the console against a staging engine instead of localhost.
+# ENGINE_PORT=8010
+# CONSOLE_PORT=3000

@@ -1,0 +1,153 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap");
+
+/* Hallmark · studied-DNA (source: url https://langfuse.com/)
+ * paper #f6f6f3 warm-greige · accent #fbff81 acid-yellow · hairline #cfcfc9
+ * observed-fonts: Inter + Geist Mono + F37 Analog (display serif substituted:
+ *   Instrument Serif — F37 Analog is a commercial licence we do not hold)
+ * rhythm: unknown (URL mode)
+ * genre: modern-minimal · macrostructure: Workbench
+ * pre-emit critique: P5 H5 E4 S5 R5 V4
+ */
+
+@theme {
+  /* Surfaces step in warm greige and separate with a hairline. There is no
+     pure white and no shadow anywhere in the reference — depth is carried by
+     one 1px line, which is why a panel here never floats. */
+  --color-canvas: #f6f6f3;
+  --color-surface: #edede8;
+  --color-raised: #e5e5e1;
+  --color-sunken: #e0e0da;
+
+  --color-line: #cfcfc9;
+  --color-line-strong: #bebeb6;
+  --color-line-ink: #404039;
+
+  /* Warm greys throughout. Cool ink on warm paper reads as a mismatch, and it
+     was the loudest wrong note in the previous build. */
+  --color-ink: #222220;
+  --color-ink-2: #3d3d38;
+  --color-ink-3: #6b6b66;
+  --color-ink-4: #a7a7a0;
+
+  /* Interaction. Dark ink on warm paper: the primary action is the darkest
+     thing on screen, which reads as weight rather than as a warning. The
+     reference's acid yellow collided with the amber "needs review" status and
+     made every button look like an alert. */
+  --color-cta: #2f2f2b;
+  --color-cta-hover: #454540;
+  --color-cta-ink: #f6f6f3;
+  --color-focus: #404039;
+
+  /* Status keeps 's meanings and moves onto warm ground.
+     AI-generated — violet, the one claim colour that must read "not settled". */
+  --color-violet-soft: #efeafc;
+  --color-violet: #6b52c9;
+  --color-violet-strong: #55409f;
+
+  /* Validated — a human accepted it. */
+  --color-teal-soft: #e4f2ec;
+  --color-teal: #1c8f76;
+  --color-teal-strong: #14705c;
+
+  /* Needs review — pushed to ochre so it cannot be mistaken for the CTA
+     yellow now that yellow means "press this". */
+  --color-amber-soft: #f4ead7;
+  --color-amber: #a97822;
+  --color-amber-strong: #855b13;
+
+  /* Failure and rejection only. */
+  --color-red-soft: #f7e7e3;
+  --color-red: #b6452f;
+  --color-red-strong: #93341f;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-display: "Instrument Serif", Georgia, serif;
+
+  --text-display: 30px;
+  --text-display--line-height: 36px;
+  --text-title: 20px;
+  --text-title--line-height: 28px;
+  --text-table: 17px;
+  --text-table--line-height: 24px;
+  --text-panel: 13px;
+  --text-panel--line-height: 18px;
+  --text-body: 13.5px;
+  --text-body--line-height: 20px;
+  --text-meta: 11.5px;
+  --text-meta--line-height: 16px;
+  --text-badge: 10.5px;
+  --text-badge--line-height: 14px;
+  --text-ident: 12.5px;
+  --text-ident--line-height: 18px;
+
+  /* Tight. The reference sits at 4px for panels, 8px at most — anything
+     rounder reads as a consumer app rather than an instrument. */
+  --radius-panel: 6px;
+  --radius-control: 4px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow-x: clip;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Never animated: a ring that fades in reads as lag on keyboard navigation,
+     and this interface is meant to be driven from the keyboard. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: #e3e3dc;
+    color: var(--color-ink);
+  }
+}
+
+@layer utilities {
+  /* Every database identifier is monospace — table names, columns, types,
+     sample values. Setting one in prose invites reading it as prose. */
+  .ident {
+    font-family: var(--font-mono);
+    font-size: var(--text-ident);
+    line-height: var(--text-ident--line-height);
+    letter-spacing: -0.01em;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  /* The reference's dashed rule, used to divide without asserting hierarchy. */
+  .rule-dashed {
+    border-top: 1px dashed var(--color-line-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

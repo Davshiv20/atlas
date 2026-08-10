@@ -1,0 +1,29 @@
+# Root ignores: things that appear anywhere in the tree.
+# Package-specific build artefacts live in engine/.gitignore and
+# console/.gitignore, so each package stays self-describing.
+
+# Secrets — never tracked in any package. .env.example is the tracked template.
+.env
+.env.*
+!.env.example
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# direnv — the .envrc files are tracked; its cache and local overrides are not.
+.direnv/
+.envrc.local
+
+# Runtime volume for `make image-run` — catalogues, jobs, credentials.
+/data/
+
+# Agent scratch
+.pi-subagents/
+# Scraped third-party assets from the design workflow — someone else's site,
+# and regenerable. Never part of the repo.
+.firecrawl/

@@ -1,0 +1,24 @@
+# Everything the build does not read, and everything it must never copy.
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+
+# Secrets and generated catalogues — the image builds its own empty /data.
+**/.env
+**/.env.*
+!**/.env.example
+**/.secrets.env
+engine/out
+engine/out_evals
+
+.git
+.github
+.firecrawl
+.pi-subagents
+.direnv
+**/.DS_Store

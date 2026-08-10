@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Structured product report for the Atlas Agent Semantic Context Layer." />
+  <title>Atlas — Agent Semantic Context Layer · Product Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4
+     * macrostructure: Product Report · theme: studied-DNA (source: langfuse.com)
+     * audience: product and engineering reviewers · use: review and align · tone: technical
+     */
+    :root {
+      --canvas: #edede8;
+      --paper: #f7f7f4;
+      --raised: #ffffff;
+      --ink: #101113;
+      --ink-soft: #3d3f3b;
+      --muted: #62645f;
+      --faint: #92948d;
+      --line: #cfcfc9;
+      --line-dark: #aaa9a2;
+      --blue: #1863dc;
+      --blue-dark: #104ead;
+      --blue-soft: #e5edfb;
+      --yellow: #f4f542;
+      --green: #17735a;
+      --green-soft: #e2f1eb;
+      --amber: #8b5913;
+      --amber-soft: #f7ead6;
+      --red: #9f3636;
+      --red-soft: #f8e1e1;
+      --sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+      --mono: "JetBrains Mono", ui-monospace, monospace;
+      --radius: 3px;
+      --sidebar: 248px;
+      --measure: 940px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--canvas); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+    a { color: inherit; text-decoration: none; }
+    code, pre, .mono { font-family: var(--mono); }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .shell { display: grid; grid-template-columns: var(--sidebar) minmax(0,1fr); min-height: 100vh; }
+    .sidebar { position: sticky; top: 0; align-self: start; height: 100vh; border-right: 1px solid var(--line-dark); background: var(--paper); padding: 24px 18px; overflow-y: auto; }
+    .brand { display: flex; align-items: center; gap: 9px; margin-bottom: 30px; font-weight: 800; font-size: 18px; letter-spacing: -.04em; }
+    .brand-mark { width: 18px; height: 18px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; transform: rotate(45deg); }
+    .brand-mark i { background: var(--ink); }
+    .brand-mark i:nth-child(2), .brand-mark i:nth-child(3) { background: var(--blue); }
+    .side-meta { border: 1px solid var(--line); background: var(--raised); padding: 10px; margin-bottom: 22px; }
+    .side-meta span { display: block; color: var(--faint); font: 500 9px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .08em; }
+    .side-meta strong { display: block; margin-top: 3px; font-size: 11px; }
+    .toc-title { margin-bottom: 8px; color: var(--faint); font: 600 9px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .09em; }
+    .toc { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+    .toc li { counter-increment: toc; }
+    .toc a { display: grid; grid-template-columns: 24px 1fr; gap: 5px; padding: 5px 6px; border-left: 2px solid transparent; color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .toc a:before { content: counter(toc, decimal-leading-zero); color: var(--faint); font: 500 9px var(--mono); }
+    .toc a:hover { color: var(--ink); border-left-color: var(--blue); background: var(--blue-soft); }
+    .side-foot { margin-top: 24px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--faint); font: 500 9px/1.6 var(--mono); }
+    main { min-width: 0; }
+    .document { width: min(calc(100% - 64px), var(--measure)); margin: 0 auto; padding: 64px 0 100px; }
+    .doc-head { border-top: 5px solid var(--ink); border-bottom: 1px solid var(--line-dark); padding: 32px 0 26px; }
+    .eyebrow { color: var(--blue-dark); font: 600 10px/1.4 var(--mono); text-transform: uppercase; letter-spacing: .09em; }
+    h1 { max-width: 800px; margin: 16px 0 14px; font-size: clamp(38px,6vw,62px); line-height: 1.01; letter-spacing: -.06em; }
+    .dek { max-width: 760px; margin: 0; color: var(--ink-soft); font-size: 18px; line-height: 1.55; }
+    .highlight { background: linear-gradient(transparent 16%, var(--yellow) 16%, var(--yellow) 91%, transparent 91%); padding-inline: .06em; }
+    .meta-strip { display: grid; grid-template-columns: repeat(4,1fr); margin-top: 28px; border: 1px solid var(--line); background: var(--line); gap: 1px; }
+    .meta-item { min-width: 0; padding: 10px 12px; background: var(--paper); }
+    .meta-item span { display: block; color: var(--faint); font: 500 8px var(--mono); text-transform: uppercase; }
+    .meta-item strong { display: block; margin-top: 3px; font-size: 11px; overflow-wrap: anywhere; }
+    section { padding: 54px 0; border-bottom: 1px solid var(--line-dark); scroll-margin-top: 20px; }
+    .section-head { display: grid; grid-template-columns: 58px minmax(0,1fr); gap: 18px; align-items: start; margin-bottom: 24px; }
+    .section-num { color: var(--blue-dark); font: 600 10px var(--mono); padding-top: 7px; }
+    h2 { margin: 0; font-size: 30px; line-height: 1.14; letter-spacing: -.045em; }
+    h3 { margin: 0; font-size: 17px; letter-spacing: -.025em; }
+    p { margin: 0 0 14px; color: var(--ink-soft); }
+    .lede { max-width: 76ch; margin: 10px 0 0; color: var(--muted); font-size: 14px; }
+    .callout { border: 1px solid var(--line-dark); border-left: 4px solid var(--blue); background: var(--raised); padding: 20px; }
+    .callout.dark { border-color: var(--ink); background: var(--ink); color: var(--raised); }
+    .callout.dark p { color: #d8d8d3; }
+    .callout.yellow { border-left-color: var(--amber); background: #fafae2; }
+    .callout strong:first-child { display: block; margin-bottom: 7px; font-size: 15px; }
+    .callout p:last-child { margin-bottom: 0; }
+    .decision { margin-top: 14px; display: grid; grid-template-columns: 34px 1fr; gap: 12px; align-items: start; }
+    .decision-num { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid var(--line-dark); background: var(--paper); color: var(--blue-dark); font: 600 9px var(--mono); }
+    .decision b { display: block; font-size: 13px; }
+    .decision p { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+    .stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); border: 1px solid var(--line-dark); background: var(--line); gap: 1px; margin-top: 20px; }
+    .stat { min-height: 124px; padding: 16px; background: var(--paper); }
+    .stat span { display: block; color: var(--faint); font: 500 8px var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+    .stat strong { display: block; margin-top: 24px; font-size: 25px; line-height: 1.05; letter-spacing: -.04em; }
+    .stat small { display: block; margin-top: 5px; color: var(--muted); font-size: 9px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line-dark); background: var(--line); gap: 1px; }
+    .card { background: var(--paper); padding: 20px; min-width: 0; }
+    .card .label { display: block; margin-bottom: 34px; color: var(--blue-dark); font: 600 9px var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+    .card p { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+    .clean { list-style: none; margin: 14px 0 0; padding: 0; }
+    .clean li { position: relative; padding: 7px 0 7px 18px; border-top: 1px solid var(--line); color: var(--ink-soft); font-size: 12px; }
+    .clean li:before { content: "—"; position: absolute; left: 0; color: var(--blue-dark); }
+    table.compact { width: 100%; border-collapse: collapse; border: 1px solid var(--line-dark); background: var(--paper); }
+    table.compact th, table.compact td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    table.compact th { background: var(--ink); color: var(--raised); font: 600 8px var(--mono); text-transform: uppercase; letter-spacing: .07em; }
+    table.compact td { font-size: 11px; }
+    table.compact tr:last-child td { border-bottom: 0; }
+    .chip { display: inline-block; border-radius: 2px; padding: 3px 6px; font: 600 8px var(--mono); white-space: nowrap; }
+    .chip.green { color: var(--green); background: var(--green-soft); }
+    .chip.blue { color: var(--blue-dark); background: var(--blue-soft); }
+    .chip.amber { color: var(--amber); background: var(--amber-soft); }
+    .chip.red { color: var(--red); background: var(--red-soft); }
+    .loop { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); border: 1px solid var(--line-dark); background: var(--line); gap: 1px; }
+    .loop-step { min-height: 112px; padding: 12px; background: var(--paper); }
+    .loop-step span { color: var(--faint); font: 500 8px var(--mono); }
+    .loop-step strong { display: block; margin-top: 37px; font-size: 11px; }
+    .loop-step:nth-child(4) { background: var(--yellow); }
+    .funnel { border: 1px solid var(--line-dark); background: var(--paper); padding: 22px; }
+    .funnel-row { display: grid; grid-template-columns: 76px minmax(0,1fr) 210px; align-items: center; gap: 16px; min-height: 46px; border-bottom: 1px solid var(--line); }
+    .funnel-row:last-child { border-bottom: 0; }
+    .funnel-row strong { font-size: 18px; letter-spacing: -.04em; }
+    .funnel-row span { color: var(--muted); font: 500 9px var(--mono); }
+    .bar { height: 8px; background: var(--blue-soft); border: 1px solid #b9cdf1; }
+    .funnel-row:nth-child(1) .bar { width: 100%; }.funnel-row:nth-child(2) .bar { width: 78%; }.funnel-row:nth-child(3) .bar { width: 49%; }.funnel-row:nth-child(4) .bar { width: 32%; }.funnel-row:nth-child(5) .bar { width: 22%; }.funnel-row:nth-child(6) .bar { width: 14%; background: var(--yellow); border-color: #c4c528; }
+    .flow { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); border: 1px solid var(--line-dark); background: var(--line); gap: 1px; }
+    .flow-node { position: relative; padding: 15px; min-height: 106px; background: var(--raised); }
+    .flow-node span { color: var(--faint); font: 500 8px var(--mono); }
+    .flow-node b { display: block; margin-top: 28px; font-size: 11px; }
+    .flow-node small { display: block; color: var(--muted); font-size: 9px; }
+    .flow-node:after { content: "→"; position: absolute; right: -8px; top: 43px; z-index: 2; width: 16px; height: 16px; display: grid; place-items: center; background: var(--ink); color: var(--raised); font: 8px var(--mono); }
+    .flow-node:last-child:after { display: none; }
+    .layers { display: grid; grid-template-columns: 1fr 44px 1fr 44px 1fr; align-items: stretch; }
+    .layer { border: 1px solid var(--line-dark); background: var(--paper); padding: 18px; }
+    .layer span { color: var(--blue-dark); font: 600 8px var(--mono); }
+    .layer h3 { margin-top: 35px; }
+    .layer p { margin: 8px 0 0; color: var(--muted); font-size: 11px; }
+    .arrow { display: grid; place-items: center; color: var(--faint); font: 16px var(--mono); }
+    .code-card { border: 1px solid var(--line-dark); background: var(--ink); color: var(--raised); padding: 18px; min-width: 0; }
+    .code-card .code-head { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid #3e4044; color: #b7b8b2; font: 500 8px var(--mono); }
+    .code-card pre { margin: 14px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: #e4e4df; font: 10px/1.7 var(--mono); }
+    .code-card .key { color: #7fb0ff; }.code-card .value { color: #e8e978; }.code-card .state { color: #8bd3b9; }
+    .formula { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 17px; border: 1px solid var(--line-dark); background: var(--paper); font: 600 11px var(--mono); }
+    .formula span { padding: 6px 8px; background: var(--blue-soft); color: var(--blue-dark); }
+    .formula b { color: var(--faint); }
+    .budget { display: grid; grid-template-columns: 170px 1fr; border: 1px solid var(--line-dark); background: var(--paper); margin-top: 18px; }
+    .budget-time { display: grid; place-items: center; border-right: 1px solid var(--line); background: var(--yellow); text-align: center; padding: 24px; }
+    .budget-time strong { display: block; font-size: 42px; line-height: 1; letter-spacing: -.06em; }
+    .budget-time span { font: 500 9px var(--mono); }
+    .budget-body { padding: 20px; }
+    .question { padding: 9px 0; border-top: 1px solid var(--line); font-size: 12px; font-weight: 600; }
+    .interface-row { display: grid; grid-template-columns: 30px 280px 1fr; gap: 14px; padding: 12px; border: 1px solid var(--line); border-bottom: 0; background: var(--paper); align-items: center; }
+    .interface-row:last-child { border-bottom: 1px solid var(--line); }
+    .interface-row span { color: var(--blue-dark); font: 600 8px var(--mono); }
+    .interface-row code { font-size: 10px; font-weight: 600; }
+    .interface-row p { margin: 0; color: var(--muted); font-size: 10px; }
+    .phase { border: 1px solid var(--line-dark); background: var(--paper); margin-bottom: 10px; }
+    .phase-head { display: grid; grid-template-columns: 65px 1fr auto; gap: 12px; align-items: center; padding: 13px 15px; }
+    .phase-num { color: var(--blue-dark); font: 600 9px var(--mono); }
+    .phase h3 { font-size: 14px; }
+    .phase-body { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+    .phase-body > div { padding: 14px; }
+    .phase-body > div + div { border-left: 1px solid var(--line); }
+    .phase-body strong { display: block; margin-bottom: 7px; font: 600 8px var(--mono); text-transform: uppercase; }
+    .phase-body p { margin: 0; color: var(--muted); font-size: 11px; }
+    details { border: 1px solid var(--line); background: var(--paper); margin-top: 10px; }
+    summary { cursor: pointer; list-style: none; padding: 11px 13px; display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; }
+    summary::-webkit-details-marker { display: none; }
+    summary:after { content: "+"; font: 500 14px var(--mono); }
+    details[open] summary:after { content: "−"; }
+    details > div { padding: 0 13px 13px; border-top: 1px solid var(--line); }
+    details p, details li { font-size: 11px; color: var(--muted); }
+    .doc-foot { padding: 22px 0; display: flex; justify-content: space-between; gap: 20px; color: var(--faint); font: 500 9px var(--mono); }
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line-dark); padding: 14px 20px; }
+      .sidebar .brand { margin-bottom: 10px; }
+      .side-meta, .toc-title, .side-foot { display: none; }
+      .toc { display: flex; overflow-x: auto; gap: 4px; padding-bottom: 2px; }
+      .toc a { width: max-content; border-left: 0; border-bottom: 2px solid transparent; }
+      .toc a:hover { border-left: 0; border-bottom-color: var(--blue); }
+      .document { padding-top: 38px; }
+      .loop { grid-template-columns: repeat(4,1fr); }
+      .stat-grid { grid-template-columns: repeat(2,1fr); }
+      .layers { grid-template-columns: 1fr; gap: 8px; }
+      .arrow { min-height: 28px; transform: rotate(90deg); }
+    }
+    @media (max-width: 680px) {
+      .document { width: min(calc(100% - 28px), var(--measure)); padding-top: 26px; }
+      h1 { font-size: 40px; }
+      .dek { font-size: 16px; }
+      .meta-strip, .grid-2, .stat-grid { grid-template-columns: 1fr; }
+      .section-head { grid-template-columns: 42px minmax(0,1fr); gap: 8px; }
+      section { padding: 40px 0; }
+      h2 { font-size: 25px; }
+      .loop, .flow { grid-template-columns: 1fr 1fr; }
+      .flow-node:after { display: none; }
+      .funnel-row { grid-template-columns: 64px minmax(0,1fr); gap: 10px; padding: 5px 0; }
+      .funnel-row span { grid-column: 1 / -1; }
+      .budget { grid-template-columns: 1fr; }
+      .budget-time { border-right: 0; border-bottom: 1px solid var(--line); }
+      .interface-row { grid-template-columns: 26px minmax(0,1fr); }
+      .interface-row p { grid-column: 2; }
+      .phase-head { grid-template-columns: 56px 1fr; }
+      .phase-head .chip { grid-column: 2; justify-self: start; }
+      .phase-body { grid-template-columns: 1fr; }
+      .phase-body > div + div { border-left: 0; border-top: 1px solid var(--line); }
+      table.compact { display: block; overflow-x: auto; white-space: nowrap; }
+      .doc-foot { flex-direction: column; }
+    }
+    @media print {
+      body { background: var(--raised); }
+      .shell { display: block; }
+      .sidebar { display: none; }
+      .document { width: 100%; max-width: none; padding: 0; }
+      section { break-inside: avoid; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" aria-label="Report navigation">
+      <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Atlas</a>
+      <div class="side-meta"><span>Document</span><strong>Product definition</strong><span style="margin-top:8px">Status</span><strong>Working specification</strong></div>
+      <div class="toc-title">Contents</div>
+      <ol class="toc">
+        <li><a href="#summary">Executive summary</a></li>
+        <li><a href="#problem">Problem and user</a></li>
+        <li><a href="#thesis">Product thesis</a></li>
+        <li><a href="#model">System model</a></li>
+        <li><a href="#claims">Claims and trust</a></li>
+        <li><a href="#validation">Validation</a></li>
+        <li><a href="#review">Human review</a></li>
+        <li><a href="#compiler">Context compiler</a></li>
+        <li><a href="#maintenance">Drift and learning</a></li>
+        <li><a href="#mvp">MVP</a></li>
+        <li><a href="#evaluation">Evaluation</a></li>
+        <li><a href="#moat">Differentiation</a></li>
+        <li><a href="#roadmap">Roadmap</a></li>
+        <li><a href="#principles">Principles</a></li>
+      </ol>
+      <div class="side-foot">Agent Semantic Context Layer<br />Product report · August 2026</div>
+    </aside>
+
+    <main>
+      <article class="document" id="top">
+        <header class="doc-head">
+          <div class="eyebrow">Product report · Agent infrastructure</div>
+          <h1>Agent Semantic<br /><span class="highlight">Context Layer</span></h1>
+          <p class="dek">A living semantic context layer that learns unfamiliar databases, compresses large schemas into meaningful business concepts, validates only high-impact uncertainty, and serves trusted task-specific context to AI agents.</p>
+          <div class="meta-strip"><div class="meta-item"><span>Status</span><strong>Working specification</strong></div><div class="meta-item"><span>Primary user</span><strong>AI engineers</strong></div><div class="meta-item"><span>Initial source</span><strong>PostgreSQL</strong></div><div class="meta-item"><span>North-star metric</span><strong>Accuracy gain / review minute</strong></div></div>
+        </header>
+
+        <section id="summary">
+          <div class="section-head"><span class="section-num">01</span><div><h2>Executive summary</h2><p class="lede">The product is a continuous reasoning system, not a schema-documentation generator.</p></div></div>
+          <div class="callout dark"><strong>Core promise</strong><p>Teams building AI agents over customer-owned databases should not have to understand hundreds of tables manually or expose raw schemas directly to an agent. Atlas turns the database into a small, evidence-backed reasoning surface shaped by the agent’s objective.</p></div>
+          <div class="stat-grid"><div class="stat"><span>Required input</span><strong>Agent objective</strong><small>Defines the bounded workflow</small></div><div class="stat"><span>Core operation</span><strong>Compress</strong><small>Physical schema → semantic surface</small></div><div class="stat"><span>Human role</span><strong>Resolve pivots</strong><small>Not field-by-field review</small></div><div class="stat"><span>Runtime output</span><strong>Minimal context</strong><small>Trusted and question-specific</small></div></div>
+          <div class="callout yellow" style="margin-top:18px"><strong>What reviewers are being asked to ratify</strong><div class="decision"><span class="decision-num">01</span><div><b>Semantic claims are the central product unit.</b><p>Observed facts, inferred meaning, validation, contradictions, and provenance remain separate.</p></div></div><div class="decision"><span class="decision-num">02</span><div><b>The agent objective shapes ingestion, review, and serving.</b><p>Atlas does not attempt to model the entire database equally.</p></div></div><div class="decision"><span class="decision-num">03</span><div><b>Success is measured through agent performance.</b><p>The key metric is agent accuracy gain per minute of human semantic review.</p></div></div></div>
+        </section>
+
+        <section id="problem">
+          <div class="section-head"><span class="section-num">02</span><div><h2>Problem and target user</h2><p class="lede">AI teams integrating databases they do not own are forced into one of two weak interfaces.</p></div></div>
+          <div class="grid-2"><article class="card"><span class="label">Failure mode A</span><h3>Raw schema and unrestricted SQL</h3><p>Hundreds of tables, inconsistent names, stale descriptions, implicit business rules, overlapping fields, and no authoritative semantic choices.</p></article><article class="card"><span class="label">Failure mode B</span><h3>Hand-built semantic layers</h3><p>Expensive domain work, long onboarding, repeated effort per customer, and maintenance burden whenever the source evolves.</p></article></div>
+          <table class="compact" style="margin-top:18px"><thead><tr><th>Primary user</th><th>Situation</th><th>Job to be done</th></tr></thead><tbody><tr><td>AI engineer or product team</td><td>Read-only access to an unfamiliar customer or internal database</td><td>Make one bounded agent workflow accurate without reverse-engineering the whole domain</td></tr><tr><td>Example teams</td><td>Vertical AI, consultancies, enterprise AI, BYOD SaaS</td><td>Support collections, finance, operations, claims, logistics, or customer-success agents</td></tr></tbody></table>
+          <div class="callout" style="margin-top:18px"><strong>Example objective</strong><p class="mono">The agent should answer questions about customers, invoices, payments, and outstanding balances.</p><p>Atlas uses this required input to rank relevant objects, constrain semantic generation, prioritize review, and compile the final task context.</p></div>
+        </section>
+
+        <section id="thesis">
+          <div class="section-head"><span class="section-num">03</span><div><h2>Product thesis: semantic compression</h2><p class="lede">Humans validate business pivots, not database metadata.</p></div></div>
+          <div class="funnel" aria-label="Illustrative semantic compression funnel"><div class="funnel-row"><strong>5,000</strong><div class="bar"></div><span>physical columns</span></div><div class="funnel-row"><strong>800</strong><div class="bar"></div><span>source tables</span></div><div class="funnel-row"><strong>40</strong><div class="bar"></div><span>workflow-relevant tables</span></div><div class="funnel-row"><strong>8</strong><div class="bar"></div><span>domain entities</span></div><div class="funnel-row"><strong>12</strong><div class="bar"></div><span>business concepts</span></div><div class="funnel-row"><strong>15</strong><div class="bar"></div><span>high-impact unresolved questions</span></div></div>
+          <div class="callout yellow" style="margin-top:18px"><strong>Strong-demo threshold</strong><p>Take an 800-table database and reduce it to approximately 15 meaningful questions that make one agent workflow substantially more reliable.</p></div>
+          <details><summary>Semantic compression pipeline</summary><div><p>Large schema → structural analysis → domain clustering → agent-task relevance retrieval → relevant source subgraph → entity and grain inference → semantic hypotheses → contradiction testing → ranked unresolved decisions.</p></div></details>
+        </section>
+
+        <section id="model">
+          <div class="section-head"><span class="section-num">04</span><div><h2>System model</h2><p class="lede">Every adapter produces a source-independent physical snapshot. Everything after ingestion operates on the canonical model.</p></div></div>
+          <div class="flow"><div class="flow-node"><span>01</span><b>Connect</b><small>Read metadata safely</small></div><div class="flow-node"><span>02</span><b>Normalize</b><small>Build canonical snapshot</small></div><div class="flow-node"><span>03</span><b>Profile</b><small>Measure privacy-safe signals</small></div><div class="flow-node"><span>04</span><b>Infer</b><small>Generate semantic claims</small></div><div class="flow-node"><span>05</span><b>Publish</b><small>Serve agent context</small></div></div>
+          <div class="layers" style="margin-top:18px"><article class="layer"><span>LAYER 01</span><h3>Physical source model</h3><p>Names, types, constraints, values, cardinality, and physical relationships. Observed facts only.</p></article><div class="arrow">→</div><article class="layer"><span>LAYER 02</span><h3>Semantic model</h3><p>Entities, grain, relationship meaning, concepts, usage guidance, claims, and trust state.</p></article><div class="arrow">→</div><article class="layer"><span>LAYER 03</span><h3>Task context view</h3><p>The minimal projection needed for one question, identity, objective, permission set, and token budget.</p></article></div>
+          <div class="grid-2" style="margin-top:18px"><article class="card"><span class="label">Canonical contract</span><h3><code>DataSourceSnapshot</code></h3><ul class="clean"><li>namespaces and objects</li><li>fields and constraints</li><li>physical relationships</li><li>privacy-safe field profiles</li></ul></article><article class="card"><span class="label">Inputs retained with provenance</span><h3>Evidence, not authority by default</h3><ul class="clean"><li>database, dbt, ORM, API, and catalog descriptions</li><li>row counts, uniqueness, nulls, ranges, enums</li><li>join coverage and masked samples</li><li>optional domain documentation and notes</li></ul></article></div>
+        </section>
+
+        <section id="claims">
+          <div class="section-head"><span class="section-num">05</span><div><h2>Semantic claims and trust</h2><p class="lede">Meaning is represented as an atomic, attributable, reviewable, versioned claim—not blended into a generated paragraph.</p></div></div>
+          <div class="grid-2"><div class="code-card"><div class="code-head"><span>SEMANTIC CLAIM</span><span>JSON</span></div><pre>{
+  <span class="key">"claim_type"</span>: <span class="value">"table_grain"</span>,
+  <span class="key">"subject"</span>: <span class="value">"billing.invoice_hdr"</span>,
+  <span class="key">"proposal"</span>: <span class="value">"One row represents one customer invoice."</span>,
+  <span class="key">"confidence"</span>: 0.91,
+  <span class="key">"status"</span>: <span class="state">"inferred"</span>,
+  <span class="key">"evidence"</span>: [
+    <span class="value">"invoice_id is unique"</span>,
+    <span class="value">"invoice_id is the primary key"</span>
+  ]
+}</pre></div><article class="card"><span class="label">Claim vocabulary</span><h3>Interpretations the system can challenge</h3><ul class="clean"><li>purpose, entity, and table grain</li><li>field meaning and canonical identifiers</li><li>relationship and lifecycle meaning</li><li>enum and business-rule definitions</li><li>sensitive-data classification</li><li>agent guidance and authoritative fields</li></ul></article></div>
+          <table class="compact" style="margin-top:18px"><thead><tr><th>Trust state</th><th>Definition</th><th>Agent behavior</th></tr></thead><tbody><tr><td><span class="chip green">observed</span></td><td>Deterministically true from source metadata or measured data</td><td>Use directly within evidence scope</td></tr><tr><td><span class="chip blue">inferred</span></td><td>Semantic interpretation supported by evidence</td><td>Use in low-risk contexts with provenance</td></tr><tr><td><span class="chip green">validated</span></td><td>Confirmed by a reviewer or authoritative evidence</td><td>Use for governed reasoning</td></tr><tr><td><span class="chip amber">unresolved</span></td><td>The system knows it cannot settle the meaning</td><td>Clarify or avoid</td></tr><tr><td><span class="chip amber">stale</span></td><td>Source change may have invalidated the claim</td><td>Revalidate or block affected capability</td></tr><tr><td><span class="chip red">conflicted</span></td><td>Evidence or approved interpretations disagree</td><td>Escalate explicitly</td></tr></tbody></table>
+        </section>
+
+        <section id="validation">
+          <div class="section-head"><span class="section-num">06</span><div><h2>Automated falsification</h2><p class="lede">Atlas should try to disprove its own hypotheses before spending human attention.</p></div></div>
+          <div class="callout"><strong>Hypothesis</strong><p><code>invoice.paid_at</code> represents the date the invoice became fully paid.</p></div>
+          <div class="grid-2" style="margin-top:14px"><article class="card"><span class="label">Typed checks</span><h3>Ask deterministic questions</h3><ul class="clean"><li>Paid timestamp with non-paid status?</li><li>Matches final payment allocation?</li><li>Refunded invoices still populated?</li><li>Partially paid invoices populated?</li></ul></article><article class="card"><span class="label">Structured result</span><h3>Update confidence and evidence</h3><ul class="clean"><li>assertion and observed result</li><li>scope, verdict, and limitations</li><li>query ID or hash</li><li>snapshot version and freshness</li></ul></article></div>
+          <p style="margin-top:14px">The agent proposes a typed hypothesis. Deterministic Atlas code compiles adapter-specific SQL, executes it read-only, evaluates the result, and stores structured evidence. Free-form agent SQL is not the validation boundary.</p>
+        </section>
+
+        <section id="review">
+          <div class="section-head"><span class="section-num">07</span><div><h2>Human review by exception</h2><p class="lede">The primary UI is a semantic review workbench—not a generic ER diagram or a field-by-field approval screen.</p></div></div>
+          <div class="formula"><span>uncertainty</span><b>×</b><span>downstream impact</span><b>×</b><span>task relevance</span><b>×</b><span>usage frequency</span><b>×</b><span>consequence</span></div>
+          <div class="budget"><div class="budget-time"><div><strong>30</strong><span>minute review budget</span></div></div><div class="budget-body"><p>The system chooses the decisions expected to resolve the most downstream ambiguity inside the available time.</p><div class="question">Which field is authoritative for invoice status?</div><div class="question">Do partially paid invoices count as unpaid for collections?</div><div class="question">Do these representative ACTIVE / INACTIVE cases match the business?</div></div></div>
+          <table class="compact" style="margin-top:18px"><thead><tr><th>Workbench surface</th><th>Purpose</th><th>Key information</th></tr></thead><tbody><tr><td>Relevant domain map</td><td>Show only objects related to the objective</td><td>Entities, source mappings, semantic relationships</td></tr><tr><td>Claim review queue</td><td>Resolve high-impact uncertainty</td><td>Proposal, evidence, contradictions, samples, affected tasks</td></tr><tr><td>Entity view</td><td>Inspect one semantic concept</td><td>Grain, identifiers, relations, trust, unresolved assumptions</td></tr><tr><td>Agent preview</td><td>Test interpretation before publishing</td><td>Question, retrieved context, plan, warnings</td></tr></tbody></table>
+        </section>
+
+        <section id="compiler">
+          <div class="section-head"><span class="section-num">08</span><div><h2>Agent context compiler</h2><p class="lede">Agents query the semantic layer. They do not receive an unrestricted raw-schema dump.</p></div></div>
+          <div class="flow"><div class="flow-node"><span>INPUT</span><b>Question + identity</b><small>Objective and permissions</small></div><div class="flow-node"><span>01</span><b>Intent</b><small>Extract required concepts</small></div><div class="flow-node"><span>02</span><b>Closure</b><small>Retrieve entities and paths</small></div><div class="flow-node"><span>03</span><b>Filter</b><small>Trust and permissions</small></div><div class="flow-node"><span>OUTPUT</span><b>Minimal package</b><small>Fit the token budget</small></div></div>
+          <div class="grid-2" style="margin-top:18px"><div class="code-card"><div class="code-head"><span>QUESTION</span><span>INPUT</span></div><pre>Which enterprise customers have unpaid invoices older than 60 days?</pre></div><div class="code-card"><div class="code-head"><span>COMPILED CONTEXT</span><span>312 TOKENS</span></div><pre><span class="key">entities</span>: Customer, Invoice, PaymentAllocation
+<span class="key">join_plan</span>: Invoice → Customer; PaymentAllocation → Invoice
+<span class="key">guidance</span>: use <span class="value">due_date</span>; subtract posted allocations
+<span class="key">warning</span>: partially-paid treatment is <span class="value">unresolved</span></pre></div></div>
+          <div style="margin-top:18px"><div class="interface-row"><span>01</span><code>search_schema(query)</code><p>Find relevant physical and semantic objects.</p></div><div class="interface-row"><span>02</span><code>describe_entity(entity)</code><p>Return grain, mappings, relationships, trust, and warnings.</p></div><div class="interface-row"><span>03</span><code>describe_field(entity, field)</code><p>Explain meaning, authority, evidence, and allowed usage.</p></div><div class="interface-row"><span>04</span><code>find_relationship_path(source, target)</code><p>Return certified fields, direction, cardinality, coverage, and evidence.</p></div><div class="interface-row"><span>05</span><code>get_context_for_question(question)</code><p>Compile a task-specific package filtered by trust, permission, and budget.</p></div></div>
+          <details><summary>Later delivery interfaces</summary><div><p>MCP, REST API, Python SDK, TypeScript SDK, JSON export, YAML export, and generated Markdown documentation.</p></div></details>
+        </section>
+
+        <section id="maintenance">
+          <div class="section-head"><span class="section-num">09</span><div><h2>Living model: drift and learning</h2><p class="lede">The layer stays correct as the source changes and becomes more useful as agents encounter real ambiguity.</p></div></div>
+          <div class="grid-2"><article class="card"><span class="label">Source drift</span><h3>Revalidate affected meaning</h3><ul class="clean"><li>new or removed objects and fields</li><li>type, enum, constraint, and relationship changes</li><li>null, cardinality, and distribution shifts</li><li>mark impacted claims stale</li><li>identify affected agent capabilities</li></ul></article><article class="card"><span class="label">Usage feedback</span><h3>Capture operational ambiguity</h3><ul class="clean"><li>missing concepts or competing fields</li><li>failed SQL and tool plans</li><li>agent clarification requests</li><li>human answer corrections</li><li>context missing from the semantic graph</li></ul></article></div>
+          <div class="callout yellow" style="margin-top:18px"><strong>Reusable semantic memory</strong><p>If “current contract value” could mean three fields, Atlas escalates rather than guesses. Once a reviewer defines it as <code>annual_contract_value</code> for active-customer questions, that correction becomes organization-specific operational knowledge.</p></div>
+          <div class="loop" style="margin-top:18px"><div class="loop-step"><span>01</span><strong>Connect</strong></div><div class="loop-step"><span>02</span><strong>Infer</strong></div><div class="loop-step"><span>03</span><strong>Compress</strong></div><div class="loop-step"><span>04</span><strong>Validate</strong></div><div class="loop-step"><span>05</span><strong>Serve</strong></div><div class="loop-step"><span>06</span><strong>Observe</strong></div><div class="loop-step"><span>07</span><strong>Improve</strong></div></div>
+        </section>
+
+        <section id="mvp">
+          <div class="section-head"><span class="section-num">10</span><div><h2>MVP definition</h2><p class="lede">Prove that a generated and lightly validated semantic layer improves one bounded agent workflow over raw-schema access.</p></div></div>
+          <div class="grid-2"><article class="card"><span class="label">In scope</span><h3>PostgreSQL to task context</h3><ul class="clean"><li>read-only connection or schema dump</li><li>privacy-safe profiling and required objective</li><li>relevance, entities, grain, relationships</li><li>claims, confidence, evidence, contradictions</li><li>ranked review queue and review decisions</li><li>semantic JSON and context compiler</li></ul></article><article class="card"><span class="label">Explicitly out of scope</span><h3>Do not dilute the proof</h3><ul class="clean"><li>universal connector coverage or ontology</li><li>full text-to-SQL or BI metrics product</li><li>writes, complex lineage, or graph database</li><li>large RBAC system</li><li>autonomous business-definition approval</li><li>broad unstructured-document ingestion</li></ul></article></div>
+          <details open><summary>Fourteen-step MVP user flow</summary><div><p>Create project → define objective → connect PostgreSQL → snapshot → profile relevant fields → rank tables → generate claims → run contradiction checks → review consequential questions → publish semantic graph → ask sample questions → compile context → compare against raw-schema baseline.</p></div></details>
+          <table class="compact" style="margin-top:18px"><thead><tr><th>Early success criterion</th><th>Expected behavior</th></tr></thead><tbody><tr><td>Compression</td><td>Hundreds of tables become a small relevant subgraph.</td></tr><tr><td>Structural validation</td><td>High-confidence grain and relationship claims are checked automatically.</td></tr><tr><td>Human attention</td><td>Fewer than approximately 20 consequential review questions.</td></tr><tr><td>Agent effect</td><td>Task accuracy materially improves against the baseline.</td></tr><tr><td>Safe failure</td><td>The system identifies meaning it cannot infer safely.</td></tr><tr><td>Memory</td><td>Reviewer decisions are preserved and reused.</td></tr></tbody></table>
+        </section>
+
+        <section id="evaluation">
+          <div class="section-head"><span class="section-num">11</span><div><h2>Evaluation design</h2><p class="lede">The core metric is agent correctness—not the fluency of generated descriptions.</p></div></div>
+          <table class="compact"><thead><tr><th>Condition</th><th>Context available to agent</th><th>Purpose</th></tr></thead><tbody><tr><td><span class="chip amber">A</span></td><td>Raw schema only</td><td>Establish baseline performance.</td></tr><tr><td><span class="chip amber">B</span></td><td>Raw schema + samples and descriptions</td><td>Measure value of lightweight enrichment.</td></tr><tr><td><span class="chip blue">C</span></td><td>Generated semantic model</td><td>Measure semantic inference value.</td></tr><tr><td><span class="chip green">D</span></td><td>Validated model + task context compiler</td><td>Measure the complete product loop.</td></tr></tbody></table>
+          <div class="grid-2" style="margin-top:18px"><article class="card"><span class="label">Measure</span><h3>Reasoning correctness</h3><ul class="clean"><li>table, field, and join selection</li><li>business-rule application</li><li>executable SQL or tool plan</li><li>final answer and unsupported assumptions</li></ul></article><article class="card"><span class="label">Measure</span><h3>System efficiency</h3><ul class="clean"><li>appropriate clarification behavior</li><li>context-token usage</li><li>human review time</li><li>semantic decisions reused</li></ul></article></div>
+          <div class="callout dark" style="margin-top:18px"><strong>Key success metric</strong><p style="font-size:18px">Agent accuracy gain per minute of human review.</p></div>
+        </section>
+
+        <section id="moat">
+          <div class="section-head"><span class="section-num">12</span><div><h2>Differentiation and moat</h2><p class="lede">Connectors, browsing, ER diagrams, generated descriptions, MCP access, and raw text-to-SQL are features or adjacent categories—not the differentiated product loop.</p></div></div>
+          <div class="grid-2"><article class="card"><span class="label">Not the moat</span><h3>Commodity capabilities</h3><ul class="clean"><li>database connectors</li><li>schema browsing and diagrams</li><li>LLM-generated documentation</li><li>generic cataloging and MCP connectivity</li></ul></article><article class="card"><span class="label">Durable asset</span><h3>Accumulated reasoning memory</h3><ul class="clean"><li>source evidence and claim history</li><li>domain priors and human corrections</li><li>representative examples and agent failures</li><li>drift history and organization-specific language</li></ul></article></div>
+          <div class="callout yellow" style="margin-top:18px"><strong>Operational knowledge example</strong><p>When a collections agent asks “amount owed”: use <code>invoice.balance_due</code>, exclude voided invoices, include posted credits, use account currency, and flag unapplied payments separately.</p></div>
+        </section>
+
+        <section id="roadmap">
+          <div class="section-head"><span class="section-num">13</span><div><h2>Phased roadmap</h2><p class="lede">Build the evidence-to-context loop in order; expand connectors only after the shared model works end to end.</p></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 01</span><h3>Source understanding</h3><span class="chip green">foundation</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Postgres ingestion, canonical physical model, privacy-safe profiles, explorer, relevance ranking.</p></div><div><strong>Exit condition</strong><p>A source-independent snapshot supports objective-shaped retrieval.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 02</span><h3>Semantic generation</h3><span class="chip blue">inference</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Descriptions, grain, entities, relationship meaning, claims, confidence, evidence.</p></div><div><strong>Exit condition</strong><p>Atomic hypotheses are attributable and testable.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 03</span><h3>Compression and review</h3><span class="chip blue">focus</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Clustering, subgraphs, contradiction tests, priority scoring, review decisions.</p></div><div><strong>Exit condition</strong><p>Humans review only consequential ambiguity.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 04</span><h3>Agent serving</h3><span class="chip blue">runtime</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Semantic JSON, schema search, descriptions, relationship paths, context compiler.</p></div><div><strong>Exit condition</strong><p>Agents receive minimal task-specific context through a service boundary.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 05</span><h3>Continuous maintenance</h3><span class="chip amber">living</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Snapshots, drift detection, impact analysis, stale-claim handling.</p></div><div><strong>Exit condition</strong><p>Source changes trigger scoped revalidation.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 06</span><h3>Learning loop</h3><span class="chip amber">memory</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Failure capture, ambiguity escalation, reusable corrections, organization memory.</p></div><div><strong>Exit condition</strong><p>Real usage improves future context compilation.</p></div></div></div>
+          <div class="phase"><div class="phase-head"><span class="phase-num">PHASE 07</span><h3>Expansion</h3><span class="chip amber">later</span></div><div class="phase-body"><div><strong>Deliver</strong><p>Snowflake, BigQuery, MySQL, MCP, SDKs, templates, APIs, governance.</p></div><div><strong>Exit condition</strong><p>New adapters produce the same canonical snapshot without semantic rewrites.</p></div></div></div>
+        </section>
+
+        <section id="principles">
+          <div class="section-head"><span class="section-num">14</span><div><h2>Product principles and north star</h2><p class="lede">The product should unlock trusted agent reasoning with the least human semantic work.</p></div></div>
+          <table class="compact"><thead><tr><th>#</th><th>Principle</th><th>Constraint</th></tr></thead><tbody><tr><td>01</td><td>Never hide uncertainty</td><td>Unknown is represented explicitly, never converted into confident prose.</td></tr><tr><td>02</td><td>Separate observation and inference</td><td>The UI and runtime preserve the boundary.</td></tr><tr><td>03</td><td>Human attention is scarce</td><td>Review the highest-impact ambiguity, not every object.</td></tr><tr><td>04</td><td>Objective shapes the model</td><td>Do not model the database uniformly.</td></tr><tr><td>05</td><td>Prefer minimal sufficient context</td><td>Serve only what the task requires.</td></tr><tr><td>06</td><td>Semantics are falsifiable</td><td>Test generated claims wherever possible.</td></tr><tr><td>07</td><td>The model is living</td><td>Source drift, corrections, and failures update it.</td></tr><tr><td>08</td><td>Fail safely</td><td>Tell the agent what is missing instead of guessing.</td></tr></tbody></table>
+          <div class="callout dark" style="margin-top:18px"><strong>North-star question</strong><p style="font-size:18px">How much trusted agent reasoning can we unlock with the least human semantic work?</p></div>
+          <details><summary>Source-adapter and security appendix</summary><div><p><strong>Adapters.</strong> PostgreSQL first; Snowflake, BigQuery, MySQL, SQL Server, Databricks, Salesforce, REST APIs, tabular exports, and suitable document stores later. Each adapter owns source-specific connection, quoting, extraction, profiling, read-only setup, timeouts, query IDs, and check execution.</p><p><strong>Security defaults.</strong> Read-only source access, no customer writes, local profiling where possible, sensitive-field detection, identifier masking, email/phone/address redaction, no free-text samples by default, summarized distributions, and configurable per-field sampling policy.</p></div></details>
+        </section>
+
+        <footer class="doc-foot"><span>Atlas · Product definition</span><span>Structured report · August 2026</span></footer>
+      </article>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,49 @@
+[project]
+name = "atlas"
+version = "0.1.0"
+description = "Grounded business-context catalogue generator for unfamiliar database schemas"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.141.1",
+    "openai>=2.50.0",
+    "psycopg[binary]>=3.2",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.14.2",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0",
+    "typer>=0.15",
+    "uvicorn>=0.52.0",
+]
+
+[project.scripts]
+atlas = "atlas.cli:app"
+
+# Type checking. This section is also what anchors the project root at
+# `engine/` for an editor's language server: basedpyright walks up from the
+# file being edited, finds this, and picks up `engine/.venv` beside it. Without
+# it every third-party import resolves against the system Python and reports
+# missing, however the editor is opened.
+[tool.basedpyright]
+include = ["src", "tests"]
+exclude = ["out"]
+typeCheckingMode = "standard"
+pythonVersion = "3.12"
+reportMissingTypeStubs = false
+
+[tool.pytest.ini_options]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/atlas"]
+
+[tool.ruff]
+line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

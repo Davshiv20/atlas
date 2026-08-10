@@ -1,0 +1,20 @@
+// Type checking when the editor is opened at the repo root.
+//
+// basedpyright takes its project root from where it is launched — it does not
+// walk up from the file being edited. So the `[tool.basedpyright]` section in
+// engine/pyproject.toml only applies when engine/ is the root. This file is the
+// same settings for the other case; the two must be kept in step.
+//
+// Without it, imports resolve against the system Python ("pydantic could not be
+// resolved") and the default `recommended` rule set produces a few hundred
+// extra warnings.
+{
+  "include": ["engine/src", "engine/tests"],
+  "exclude": ["**/node_modules", "**/__pycache__", "**/.venv", "engine/out"],
+  "venvPath": "engine",
+  "venv": ".venv",
+  "extraPaths": ["engine/src"],
+  "pythonVersion": "3.12",
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": false
+}

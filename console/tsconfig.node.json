@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": [
+      "node"
+    ],
+    "strict": true,
+    "noEmit": false,
+    "composite": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "./.tsbuild",
+    "tsBuildInfoFile": "./.tsbuild/node.tsbuildinfo"
+  },
+  "include": [
+    "vite.config.ts"
+  ]
+}
