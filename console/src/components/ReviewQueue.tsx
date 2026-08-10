@@ -1,24 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import type { SchemaOutput } from "@/api/types";
-import { ClaimCard } from "@/components/ClaimCard";
+import type { ClaimStatus, SchemaOutput, TrustFactors } from "@/api/types";
+import { describeError } from "@/api/errors";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
-import { buildQueue, countFor, settledOf, type Filter, type TableProgress } from "@/lib/queue";
+import {
+  buildQueue,
+  countFor,
+  needsReview,
+  rowsFor,
+  type Filter,
+  type ReviewRow as ReviewLine,
+  type TableProgress,
+} from "@/lib/queue";
+import { canVerify, confidenceLabel, trustPercent } from "@/lib/review";
 import { setSearch } from "@/store/uiSlice";
+import { useReviewMutation } from "@/store/api";
 import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
- * The review screen.
+ * Table-sheet review.
  *
- * One decision on screen at a time, with its evidence directly underneath it.
- * The old three-pane layout put the claim in the middle and the evidence for
- * that same claim in a panel to the right, so reading one decision meant
- * moving between two columns; and the left rail listed tables, which is not
- * what a reviewer is being asked about.
- *
- * The rail is now a progress ledger — in progress above, done below — and
- * `J`/`K` move through the queue without touching it. Progress is the
- * navigation.
+ * YAML remains the generated output. Review is simpler: pick a table, scan all
+ * fields in one sheet, and touch only the highlighted rows. A routine column
+ * can stay inferred without becoming a task for a human.
  */
 export function ReviewQueue({
   output,
@@ -30,30 +34,12 @@ export function ReviewQueue({
   const dispatch = useAppDispatch();
   const search = useAppSelector((s) => s.ui.search);
   const [filter, setFilter] = useState<Filter>("needs-review");
-  const [position, setPosition] = useState(0);
-  const [showSpec, setShowSpec] = useState(false);
+  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [showYaml, setShowYaml] = useState(false);
 
   const queue = useMemo(() => buildQueue(output, filter), [output, filter]);
-  const current = queue.items[Math.min(position, queue.items.length - 1)];
-
-  // Approving removes an item, so the index has to be pulled back rather than
-  // left pointing past the end.
-  useEffect(() => {
-    if (position >= queue.items.length && queue.items.length > 0) {
-      setPosition(queue.items.length - 1);
-    }
-  }, [queue.items.length, position]);
-
-  const move = (step: number) =>
-    setPosition((at) => Math.min(Math.max(at + step, 0), Math.max(queue.items.length - 1, 0)));
-
-  useQueueKeys({ move, onSpec: () => setShowSpec((v) => !v), active: Boolean(current) });
-
-  const table = current?.table ?? queue.inProgress[0]?.table.name ?? null;
-  const settled = useMemo(() => {
-    const entry = output.tables.find((t) => t.name === table);
-    return entry ? settledOf(entry) : [];
-  }, [output.tables, table]);
+  const tableName = selectedTable ?? queue.tables[0]?.table.name ?? null;
+  const table = output.tables.find((candidate) => candidate.name === tableName) ?? null;
 
   return (
     <main className="grid min-h-0 grid-cols-[268px_minmax(0,1fr)] overflow-hidden">
@@ -64,64 +50,44 @@ export function ReviewQueue({
         output={output}
         search={search}
         onSearch={(value) => dispatch(setSearch(value))}
-        active={table}
+        active={tableName}
+        onSelect={setSelectedTable}
       />
 
       <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center gap-3 border-b border-line px-6 py-3">
-          <span className="text-meta font-semibold uppercase tracking-wide text-ink-3">Queue</span>
+          <span className="text-meta font-semibold uppercase tracking-wide text-ink-3">
+            Table review
+          </span>
           <span className="text-body text-ink-2">
-            {queue.items.length === 0
-              ? "nothing outstanding"
-              : `claim ${Math.min(position + 1, queue.items.length)} of ${queue.items.length}`}
-            {table && <span className="ident ml-2 text-ink">{table}</span>}
+            {table ? (
+              <>
+                Scan the sheet. Touch only highlighted rows.
+                <span className="ident ml-2 text-ink">{table.name}</span>
+              </>
+            ) : (
+              "nothing to review"
+            )}
           </span>
 
           <span className="ml-auto flex items-center gap-3">
-            <SpecSwitch on={showSpec} onToggle={() => setShowSpec((v) => !v)} />
-            <span className="flex items-center gap-1.5 text-meta text-ink-3">
-              move <Key>J</Key> <Key>K</Key>
-            </span>
+            <SpecSwitch on={showYaml} onToggle={() => setShowYaml((value) => !value)} />
           </span>
         </div>
 
-        {showSpec ? (
+        {showYaml ? (
           <SemanticViewPane
             workspace={workspace}
-            table={table}
-            onReview={() => setShowSpec(false)}
+            table={table?.name ?? null}
+            onReview={() => setShowYaml(false)}
             bordered={false}
           />
+        ) : table ? (
+          <ReviewSheet table={table} workspace={workspace} />
         ) : (
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-            {settled.map((item) => (
-              <p key={item.id} className="mb-2 flex items-baseline gap-3 rounded-[--radius-control] bg-raised px-3 py-2">
-                <span className="text-meta font-semibold uppercase tracking-wide text-teal-strong">
-                  done
-                </span>
-                <span className="ident text-ink-2">{item.label}</span>
-                <span className="min-w-0 flex-1 truncate text-body text-ink-2">
-                  {item.claim.text}
-                </span>
-              </p>
-            ))}
-
-            {current ? (
-              <ClaimCard
-                key={current.id}
-                item={current}
-                workspace={workspace}
-                onSettled={() => setPosition((at) => Math.min(at, queue.items.length - 2))}
-              />
-            ) : (
-              <p className="rounded-[--radius-panel] border border-teal/25 bg-teal-soft px-4 py-8 text-center text-body text-teal-strong">
-                Everything consequential has been judged. Switch the filter to
-                <span className="font-semibold"> All</span> to see the rest.
-              </p>
-            )}
-
-            <NextUp queue={queue} position={position} onJump={setPosition} />
-          </div>
+          <p className="m-6 rounded-[--radius-panel] border border-teal/25 bg-teal-soft px-4 py-8 text-center text-body text-teal-strong">
+            No highlighted rows. Switch to <span className="font-semibold">All</span> to audit every field.
+          </p>
         )}
       </section>
     </main>
@@ -136,6 +102,7 @@ function Ledger({
   search,
   onSearch,
   active,
+  onSelect,
 }: {
   queue: ReturnType<typeof buildQueue>;
   filter: Filter;
@@ -144,10 +111,11 @@ function Ledger({
   search: string;
   onSearch: (value: string) => void;
   active: string | null;
+  onSelect: (table: string) => void;
 }) {
   const needle = search.trim().toLowerCase();
   const shown = (entries: TableProgress[]) =>
-    needle ? entries.filter((e) => e.table.name.toLowerCase().includes(needle)) : entries;
+    needle ? entries.filter((entry) => entry.table.name.toLowerCase().includes(needle)) : entries;
 
   return (
     <nav className="flex h-full min-h-0 flex-col border-r border-line bg-surface">
@@ -180,11 +148,17 @@ function Ledger({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
-        <Section label="In progress" entries={shown(queue.inProgress)} active={active} />
         <Section
-          label={`Done · ${queue.done.length}`}
-          entries={shown(queue.done)}
+          label="Highlighted"
+          entries={shown(queue.needsReview)}
           active={active}
+          onSelect={onSelect}
+        />
+        <Section
+          label={`Quiet · ${queue.quiet.length}`}
+          entries={shown(queue.quiet)}
+          active={active}
+          onSelect={onSelect}
         />
       </div>
     </nav>
@@ -195,10 +169,12 @@ function Section({
   label,
   entries,
   active,
+  onSelect,
 }: {
   label: string;
   entries: TableProgress[];
   active: string | null;
+  onSelect: (table: string) => void;
 }) {
   if (entries.length === 0) return null;
   return (
@@ -209,20 +185,26 @@ function Section({
       <ul>
         {entries.map((entry) => (
           <li key={entry.table.name}>
-            <div
+            <button
+              type="button"
+              onClick={() => onSelect(entry.table.name)}
               aria-current={entry.table.name === active ? "true" : undefined}
-              className={`flex items-center gap-2 border-l-2 px-3 py-1.5 ${
+              className={`flex w-full items-center gap-2 border-l-2 px-3 py-1.5 text-left ${
                 entry.table.name === active
                   ? "border-l-line-ink bg-raised"
-                  : "border-l-transparent"
+                  : "border-l-transparent hover:bg-raised/70"
               }`}
             >
               <span className="ident min-w-0 flex-1 truncate text-ink">{entry.table.name}</span>
-              <Bar settled={entry.settled} total={entry.total} />
+              {entry.highlighted > 0 && (
+                <span className="rounded-full bg-amber-soft px-1.5 text-badge font-semibold text-amber-strong">
+                  {entry.highlighted}
+                </span>
+              )}
               <span className="shrink-0 text-meta tabular-nums text-ink-3">
-                {entry.settled}/{entry.total}
+                {entry.totalRows}
               </span>
-            </div>
+            </button>
           </li>
         ))}
       </ul>
@@ -230,65 +212,165 @@ function Section({
   );
 }
 
-/** Progress as a bar, because a ratio has to be read and a length does not. */
-function Bar({ settled, total }: { settled: number; total: number }) {
-  const share = total === 0 ? 0 : settled / total;
-  return (
-    <span className="h-[3px] w-8 shrink-0 overflow-hidden rounded-full bg-sunken">
-      <span
-        className={`block h-full rounded-full ${share === 1 ? "bg-teal" : "bg-amber"}`}
-        style={{ width: `${Math.max(share * 100, share > 0 ? 12 : 0)}%` }}
-      />
-    </span>
-  );
-}
-
-function NextUp({
-  queue,
-  position,
-  onJump,
+function ReviewSheet({
+  table,
+  workspace,
 }: {
-  queue: ReturnType<typeof buildQueue>;
-  position: number;
-  onJump: (index: number) => void;
+  table: SchemaOutput["tables"][number];
+  workspace: string;
 }) {
-  const upcoming = queue.items.slice(position + 1, position + 4);
-  if (upcoming.length === 0) return null;
+  const rows = rowsFor(table, "all");
+  const highlighted = rows.filter(needsReview).length;
 
   return (
-    <section className="mt-5">
-      <p className="mb-2 text-meta font-semibold uppercase tracking-wide text-ink-3">Next up</p>
-      <ul className="flex flex-col gap-1">
-        {upcoming.map((item, offset) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              onClick={() => onJump(position + 1 + offset)}
-              className="flex w-full items-baseline gap-3 rounded-[--radius-control] border border-line bg-surface px-3 py-2 text-left hover:border-line-strong"
-            >
-              <span className="ident shrink-0 text-ink">{item.label}</span>
-              <span className="min-w-0 flex-1 truncate text-body text-ink-2">
-                {item.claim.text}
-              </span>
-              <Confidence value={item.claim.confidence} />
-            </button>
-          </li>
+    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+      <header className="mb-3 rounded-[--radius-panel] border border-line bg-surface px-4 py-3">
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h2 className="ident text-table text-ink">{table.qualified_name}</h2>
+          <span className="text-body text-ink-3">
+            {table.row_count.toLocaleString()} rows · {highlighted} highlighted
+          </span>
+        </div>
+        <p className="mt-1 text-body text-ink-3">
+          Yellow means “worth a human look.” Red means conflicting or very weak support on an important claim.
+          Routine rows can stay as-is.
+        </p>
+      </header>
+
+      <div className="overflow-hidden rounded-[--radius-panel] border border-line bg-surface">
+        <div className="grid grid-cols-[150px_minmax(160px,1fr)_80px_120px_130px] gap-3 border-b border-line bg-raised px-3 py-2 text-meta font-semibold uppercase tracking-wide text-ink-3">
+          <span>Field</span>
+          <span>Suggested meaning</span>
+          <span>Trust</span>
+          <span>Review</span>
+          <span>Action</span>
+        </div>
+        {rows.map((row) => (
+          <ReviewRow key={row.id} row={row} workspace={workspace} />
         ))}
-      </ul>
-    </section>
+      </div>
+    </div>
   );
 }
 
-function Confidence({ value }: { value: number }) {
-  const low = value < 0.5;
+function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
+  const reviewer = useAppSelector((state) => state.ui.reviewer);
+  const [review, { isLoading, error }] = useReviewMutation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.claim?.text ?? row.proposed);
+  const claim = row.claim;
+  const trust = claim ? confidenceLabel(claim) : null;
+  const canApprove = claim ? canVerify(claim) : false;
+
+  const submit = async (decision: ClaimStatus, text?: string) => {
+    if (!claim) return;
+    await review({
+      workspace,
+      claimId: row.id,
+      body: { decision, reviewer, ...(text !== undefined ? { claim: text } : {}) },
+    }).unwrap();
+    setEditing(false);
+  };
+
   return (
-    <span
-      className={`shrink-0 rounded-full px-1.5 text-badge font-semibold tabular-nums ${
-        low ? "bg-amber-soft text-amber-strong" : "bg-teal-soft text-teal-strong"
+    <div
+      className={`grid grid-cols-[150px_minmax(160px,1fr)_80px_120px_130px] gap-3 border-b border-line px-3 py-2 last:border-b-0 ${
+        row.risk === "red"
+          ? "bg-red-soft/70"
+          : row.risk === "yellow"
+            ? "bg-amber-soft/70"
+            : "bg-surface"
       }`}
     >
-      Trust {Math.round(value * 100)}
-    </span>
+      <div className="min-w-0">
+        <p className="ident truncate text-ink">{row.role}</p>
+        <p className="truncate text-meta text-ink-3">{row.source}</p>
+      </div>
+
+      <div className="min-w-0">
+        {editing ? (
+          <textarea
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            rows={3}
+            autoFocus
+            className="w-full resize-y rounded-[--radius-control] border border-line bg-canvas px-2 py-1 text-body text-ink focus:border-line-ink focus:outline-none"
+          />
+        ) : (
+          <p className="text-body text-ink">{row.proposed}</p>
+        )}
+        {trust && <p className="mt-1 text-meta text-ink-3">{trust.detail}</p>}
+        {error && <p className="mt-1 text-meta text-red">{describeError(error, "Could not save review.")}</p>}
+      </div>
+
+      <div>
+        {claim ? (
+          <span className="rounded-full bg-raised px-1.5 text-badge font-semibold tabular-nums text-ink-2">
+            {trustPercent(claim.confidence)}
+          </span>
+        ) : (
+          <span className="text-meta text-ink-3">—</span>
+        )}
+      </div>
+
+      <div>
+        <span
+          className={`rounded-full px-1.5 text-badge font-semibold ${
+            row.risk === "red"
+              ? "bg-red-soft text-red"
+              : row.risk === "yellow"
+                ? "bg-amber-soft text-amber-strong"
+                : "bg-teal-soft text-teal-strong"
+          }`}
+        >
+          {row.risk === "none" ? "quiet" : row.risk}
+        </span>
+        <p className="mt-1 text-meta text-ink-3">{row.reason}</p>
+      </div>
+
+      <div className="flex flex-wrap items-start gap-1.5">
+        {editing ? (
+          <>
+            <button
+              type="button"
+              disabled={isLoading || !draft.trim()}
+              onClick={() => void submit("verified", draft.trim())}
+              className={ACTION_PRIMARY}
+            >
+              Save
+            </button>
+            <button type="button" onClick={() => setEditing(false)} className={ACTION_SECONDARY}>
+              Cancel
+            </button>
+          </>
+        ) : claim ? (
+          <>
+            <button
+              type="button"
+              disabled={isLoading || !canApprove}
+              title={canApprove ? undefined : "Ground it before marking verified"}
+              onClick={() => void submit("verified")}
+              className={ACTION_PRIMARY}
+            >
+              Confirm
+            </button>
+            <button type="button" onClick={() => setEditing(true)} className={ACTION_SECONDARY}>
+              Edit
+            </button>
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => void submit("rejected")}
+              className="rounded-[--radius-control] px-2 py-1 text-meta text-red hover:bg-red-soft"
+            >
+              Reject
+            </button>
+          </>
+        ) : (
+          <span className="text-meta text-ink-3">No claim</span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -299,7 +381,7 @@ function SpecSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
       role="switch"
       aria-checked={on}
       onClick={onToggle}
-      title="Show the emitted semantic view for this table (S)"
+      title="Show generated semantic_view.yaml"
       className="flex items-center gap-2 text-meta text-ink-3 hover:text-ink"
     >
       <span
@@ -313,8 +395,7 @@ function SpecSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
           }`}
         />
       </span>
-      <span className={on ? "text-ink" : undefined}>YAML</span>
-      <Key>S</Key>
+      <span className={on ? "text-ink" : undefined}>YAML output</span>
     </button>
   );
 }
@@ -352,49 +433,8 @@ export function Key({ children }: { children: React.ReactNode }) {
   );
 }
 
-/**
- * Movement and view keys only.
- *
- * Approve, edit and reject live on the card, next to the state they act on —
- * whether an edit is in progress decides whether `E` means "start editing" or
- * is a character being typed.
- */
-function useQueueKeys({
-  move,
-  onSpec,
-  active,
-}: {
-  move: (step: number) => void;
-  onSpec: () => void;
-  active: boolean;
-}) {
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea, select")) {
-        if (event.key === "Escape") target.blur();
-        return;
-      }
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+const ACTION_PRIMARY =
+  "rounded-[--radius-control] bg-cta px-2 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4";
 
-      if (event.key === "/") {
-        event.preventDefault();
-        document.getElementById("table-search")?.focus();
-        return;
-      }
-      if (event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        onSpec();
-        return;
-      }
-      if (!active) return;
-      if (event.key === "j" || event.key === "k") {
-        event.preventDefault();
-        move(event.key === "j" ? 1 : -1);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [move, onSpec, active]);
-}
+const ACTION_SECONDARY =
+  "rounded-[--radius-control] border border-line bg-surface px-2 py-1 text-meta text-ink hover:bg-raised";

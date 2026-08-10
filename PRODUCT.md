@@ -500,22 +500,30 @@ The primary product UI should be a semantic review workbench, not an ER diagram.
 
 Shows only entities and source objects relevant to the agent objective.
 
-#### Claim review queue
+#### Table review sheet
 
-Ranked by impact and uncertainty.
+A developer-readable sheet for one table at a time. Every column remains visible, but only rows that need attention are highlighted.
 
-Each item should show:
+Each row should show:
 
-- proposal
-- confidence
-- observed evidence
-- inferred evidence
-- contradictions
-- sample values
-- source descriptions
-- affected concepts
-- affected agent tasks/tools
-- approve / edit / reject / unresolved
+- field or semantic role;
+- proposed interpretation;
+- confidence as trust score;
+- review reason;
+- observed evidence;
+- contradictions when present;
+- approve / edit / reject / unresolved.
+
+Highlighting is risk-based, not confidence-only:
+
+```text
+highlight when evidence conflicts,
+or an automatic check failed,
+or multiple meanings look possible,
+or a high-impact claim is not validated.
+```
+
+Routine rows should be visible but quiet. The reviewer should touch exceptions, not approve every column.
 
 #### Entity view
 

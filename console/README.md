@@ -43,14 +43,15 @@ is an inspection surface, not the primary validation workflow.
 
 ### Review
 
-Review generated claims in consequence-aware order. Each claim exposes its proposal,
-evidence-derived confidence, trust-state and factor breakdown, provenance, evidence, and
-current decision. Confidence is a trust score—not model certainty or a probability.
-Consequence remains separate and drives review priority. The engine rejects attempts to
-verify claims that lack sufficient grounding.
+Review one table at a time in a spreadsheet-like sheet. All fields stay visible, but only
+risky rows are highlighted. Yellow means the row deserves human attention; red means
+conflicting evidence or very weak support on an important claim. Routine rows can stay
+inferred without becoming review work.
 
-The long-term review model is risk-based: business pivots and representative cases,
-not approval of every generated field description.
+Each reviewable row exposes its proposal, evidence-derived confidence, trust-state and
+factor breakdown, provenance, evidence, and current decision. Confidence is a trust
+score—not model certainty or a probability. Consequence remains separate and drives the
+highlighting. The engine rejects attempts to verify claims that lack sufficient grounding.
 
 ### Questions
 
