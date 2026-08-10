@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import type { ClaimStatus, SchemaOutput, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
+import { Key } from "@/components/ui/Button";
 import {
   buildQueue,
   countFor,
@@ -500,13 +501,6 @@ function Chip({
   );
 }
 
-export function Key({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="rounded border border-line bg-raised px-1 font-mono text-badge text-ink-2">
-      {children}
-    </kbd>
-  );
-}
 
 const ACTION_PRIMARY =
   "rounded-[--radius-control] bg-cta px-2 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4";

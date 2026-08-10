@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { ClaimStatus, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
-import { Key } from "@/components/ReviewQueue";
 import { Badge } from "@/components/StatusBadge";
+import { Button, Key } from "@/components/ui/Button";
 import type { QueueItem } from "@/lib/queue";
 import { canVerify, confidenceLabel, trustPercent } from "@/lib/review";
 import { useReviewMutation } from "@/store/api";
@@ -147,32 +147,32 @@ export function ClaimCard({
         </p>
       )}
 
+      {/* Shortcut hints sit beside their button, never inside it: a bordered
+          chip within a filled control is what made these read as lumpy. */}
       <footer className="mt-4 flex flex-wrap items-center gap-2">
         {editing ? (
           <>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={isLoading || !draft.trim()}
               onClick={() => void submit("verified", draft.trim())}
-              className={PRIMARY}
             >
               Save and approve
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => {
                 setEditing(false);
                 setDraft(item.claim.text);
               }}
-              className="rounded-[--radius-control] px-3 py-2 text-body text-ink-2 hover:text-ink"
             >
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={isLoading || !verifiable}
               onClick={() => void submit("verified")}
               title={
@@ -180,21 +180,18 @@ export function ClaimCard({
                   ? undefined
                   : "Nothing was run that could have contradicted this — edit it or ask a question instead"
               }
-              className={PRIMARY}
             >
-              Approve <Key>A</Key>
-            </button>
-            <button type="button" onClick={() => setEditing(true)} className={SECONDARY}>
-              Edit <Key>E</Key>
-            </button>
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => void submit("rejected")}
-              className="flex items-center gap-2 rounded-[--radius-control] px-3 py-2 text-body text-red hover:bg-red-soft"
-            >
-              Reject <Key>R</Key>
-            </button>
+              Approve
+            </Button>
+            <Key>A</Key>
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Key>E</Key>
+            <Button variant="danger" disabled={isLoading} onClick={() => void submit("rejected")}>
+              Reject
+            </Button>
+            <Key>R</Key>
           </>
         )}
       </footer>
@@ -247,8 +244,3 @@ function TrustBreakdown({
   );
 }
 
-const PRIMARY =
-  "flex items-center gap-2 rounded-[--radius-control] bg-cta px-3 py-2 text-body font-medium text-cta-ink transition-colors hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4";
-
-const SECONDARY =
-  "flex items-center gap-2 rounded-[--radius-control] border border-line bg-surface px-3 py-2 text-body text-ink hover:bg-raised";
