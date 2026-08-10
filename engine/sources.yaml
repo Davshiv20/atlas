@@ -1,0 +1,6 @@
+sources:
+- id: elara
+  adapter: postgresql
+  url_env: ELARA_DATABASE_URL
+  namespace: public
+  label: null
