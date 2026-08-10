@@ -237,10 +237,11 @@ function ReviewSheet({
         </p>
       </header>
 
-      <div className="overflow-hidden rounded-[--radius-panel] border border-line bg-surface">
-        <div className="grid grid-cols-[150px_minmax(160px,1fr)_80px_120px_130px] gap-3 border-b border-line bg-raised px-3 py-2 text-meta font-semibold uppercase tracking-wide text-ink-3">
+      <div className="overflow-x-auto rounded-[--radius-panel] border border-line bg-surface">
+        <div className="grid min-w-[1060px] grid-cols-[150px_minmax(190px,1fr)_minmax(170px,.8fr)_70px_115px_125px] gap-3 border-b border-line bg-raised px-3 py-2 text-meta font-semibold uppercase tracking-wide text-ink-3">
           <span>Field</span>
           <span>Suggested meaning</span>
+          <span>Sample values</span>
           <span>Trust</span>
           <span>Review</span>
           <span>Action</span>
@@ -272,105 +273,141 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
     setEditing(false);
   };
 
+  const rowTone = row.risk === "red"
+    ? "bg-red-soft/70"
+    : row.risk === "yellow"
+      ? "bg-amber-soft/70"
+      : "bg-surface";
+
   return (
-    <div
-      className={`grid grid-cols-[150px_minmax(160px,1fr)_80px_120px_130px] gap-3 border-b border-line px-3 py-2 last:border-b-0 ${
-        row.risk === "red"
-          ? "bg-red-soft/70"
-          : row.risk === "yellow"
-            ? "bg-amber-soft/70"
-            : "bg-surface"
-      }`}
-    >
-      <div className="min-w-0">
-        <p className="ident truncate text-ink">{row.role}</p>
-        <p className="truncate text-meta text-ink-3">{row.source}</p>
-      </div>
+    <article className={`border-b border-line last:border-b-0 ${rowTone}`}>
+      <div className="grid min-w-[1060px] grid-cols-[150px_minmax(190px,1fr)_minmax(170px,.8fr)_70px_115px_125px] gap-3 px-3 py-2">
+        <div className="min-w-0">
+          <p className="ident truncate text-ink">{row.role}</p>
+          <p className="truncate text-meta text-ink-3">{row.source}</p>
+        </div>
 
-      <div className="min-w-0">
-        {editing ? (
-          <textarea
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            rows={3}
-            autoFocus
-            className="w-full resize-y rounded-[--radius-control] border border-line bg-canvas px-2 py-1 text-body text-ink focus:border-line-ink focus:outline-none"
-          />
-        ) : (
-          <p className="text-body text-ink">{row.proposed}</p>
-        )}
-        {trust && <p className="mt-1 text-meta text-ink-3">{trust.detail}</p>}
-        {error && <p className="mt-1 text-meta text-red">{describeError(error, "Could not save review.")}</p>}
-      </div>
+        <div className="min-w-0">
+          {editing ? (
+            <textarea
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={3}
+              autoFocus
+              className="w-full resize-y rounded-[--radius-control] border border-line bg-canvas px-2 py-1 text-body text-ink focus:border-line-ink focus:outline-none"
+            />
+          ) : (
+            <p className="text-body text-ink">{row.proposed}</p>
+          )}
+          {trust && <p className="mt-1 text-meta text-ink-3">{trust.detail}</p>}
+          {error && (
+            <p className="mt-1 text-meta text-red">
+              {describeError(error, "Could not save review.")}
+            </p>
+          )}
+        </div>
 
-      <div>
-        {claim ? (
-          <span className="rounded-full bg-raised px-1.5 text-badge font-semibold tabular-nums text-ink-2">
-            {trustPercent(claim.confidence)}
+        <div className="min-w-0">
+          {row.samples.length > 0 ? (
+            <div className="flex flex-wrap gap-1">
+              {row.samples.map((sample) => (
+                <span
+                  key={sample}
+                  className="max-w-full truncate rounded-[--radius-control] bg-raised px-1.5 py-[1px] text-meta text-ink-2"
+                  title={sample}
+                >
+                  {sample}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-meta text-amber-strong">No samples</p>
+          )}
+          {row.sampleNote && <p className="mt-1 text-meta text-ink-3">{row.sampleNote}</p>}
+        </div>
+
+        <div>
+          {claim ? (
+            <span className="rounded-full bg-raised px-1.5 text-badge font-semibold tabular-nums text-ink-2">
+              {trustPercent(claim.confidence)}
+            </span>
+          ) : (
+            <span className="text-meta text-ink-3">—</span>
+          )}
+        </div>
+
+        <div>
+          <span
+            className={`rounded-full px-1.5 text-badge font-semibold ${
+              row.risk === "red"
+                ? "bg-red-soft text-red"
+                : row.risk === "yellow"
+                  ? "bg-amber-soft text-amber-strong"
+                  : "bg-teal-soft text-teal-strong"
+            }`}
+          >
+            {row.risk === "none" ? "quiet" : row.risk}
           </span>
-        ) : (
-          <span className="text-meta text-ink-3">—</span>
-        )}
+          <p className="mt-1 text-meta text-ink-3">{row.reason}</p>
+        </div>
+
+        <div className="flex flex-wrap items-start gap-1.5">
+          {editing ? (
+            <>
+              <button
+                type="button"
+                disabled={isLoading || !draft.trim()}
+                onClick={() => void submit("verified", draft.trim())}
+                className={ACTION_PRIMARY}
+              >
+                Save
+              </button>
+              <button type="button" onClick={() => setEditing(false)} className={ACTION_SECONDARY}>
+                Cancel
+              </button>
+            </>
+          ) : claim ? (
+            <>
+              <button
+                type="button"
+                disabled={isLoading || !canApprove}
+                title={canApprove ? undefined : "Ground it before marking verified"}
+                onClick={() => void submit("verified")}
+                className={ACTION_PRIMARY}
+              >
+                Confirm
+              </button>
+              <button type="button" onClick={() => setEditing(true)} className={ACTION_SECONDARY}>
+                Edit
+              </button>
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => void submit("rejected")}
+                className="rounded-[--radius-control] px-2 py-1 text-meta text-red hover:bg-red-soft"
+              >
+                Reject
+              </button>
+            </>
+          ) : (
+            <span className="text-meta text-ink-3">No claim</span>
+          )}
+        </div>
       </div>
 
-      <div>
-        <span
-          className={`rounded-full px-1.5 text-badge font-semibold ${
-            row.risk === "red"
-              ? "bg-red-soft text-red"
-              : row.risk === "yellow"
-                ? "bg-amber-soft text-amber-strong"
-                : "bg-teal-soft text-teal-strong"
-          }`}
-        >
-          {row.risk === "none" ? "quiet" : row.risk}
-        </span>
-        <p className="mt-1 text-meta text-ink-3">{row.reason}</p>
-      </div>
-
-      <div className="flex flex-wrap items-start gap-1.5">
-        {editing ? (
-          <>
-            <button
-              type="button"
-              disabled={isLoading || !draft.trim()}
-              onClick={() => void submit("verified", draft.trim())}
-              className={ACTION_PRIMARY}
-            >
-              Save
-            </button>
-            <button type="button" onClick={() => setEditing(false)} className={ACTION_SECONDARY}>
-              Cancel
-            </button>
-          </>
-        ) : claim ? (
-          <>
-            <button
-              type="button"
-              disabled={isLoading || !canApprove}
-              title={canApprove ? undefined : "Ground it before marking verified"}
-              onClick={() => void submit("verified")}
-              className={ACTION_PRIMARY}
-            >
-              Confirm
-            </button>
-            <button type="button" onClick={() => setEditing(true)} className={ACTION_SECONDARY}>
-              Edit
-            </button>
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => void submit("rejected")}
-              className="rounded-[--radius-control] px-2 py-1 text-meta text-red hover:bg-red-soft"
-            >
-              Reject
-            </button>
-          </>
-        ) : (
-          <span className="text-meta text-ink-3">No claim</span>
-        )}
-      </div>
-    </div>
+      <details className="min-w-[1060px] border-t border-line/70 px-3 py-1.5">
+        <summary className="cursor-pointer text-meta font-semibold uppercase tracking-wide text-ink-3">
+          Lineage
+        </summary>
+        <ol className="mt-2 grid gap-1 pb-1 text-meta text-ink-2">
+          {row.lineage.map((line) => (
+            <li key={line} className="ident rounded-[--radius-control] bg-raised px-2 py-1">
+              {line}
+            </li>
+          ))}
+        </ol>
+      </details>
+    </article>
   );
 }
 

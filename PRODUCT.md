@@ -508,8 +508,10 @@ Each row should show:
 
 - field or semantic role;
 - proposed interpretation;
+- sample values or explicit sample-withholding reason;
 - confidence as trust score;
 - review reason;
+- compact lineage from source column to evidence to claim to YAML output;
 - observed evidence;
 - contradictions when present;
 - approve / edit / reject / unresolved.

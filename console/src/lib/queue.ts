@@ -26,6 +26,9 @@ export interface ReviewRow {
   source: string;
   proposed: string;
   dataType?: string;
+  samples: string[];
+  sampleNote?: string;
+  lineage: string[];
   consequence: Consequence;
   claim?: Claim;
   risk: Risk;
@@ -91,6 +94,8 @@ function allRows(table: TableOutput): ReviewRow[] {
     role: "Grain",
     source: table.qualified_name,
     proposed: table.grain?.text ?? "Not established",
+    samples: [`${table.row_count.toLocaleString()} rows`],
+    lineage: lineageFor(table, "grain", table.grain),
     consequence: "critical",
     claim: table.grain,
     ...riskFor(table.grain, "critical"),
@@ -102,6 +107,8 @@ function allRows(table: TableOutput): ReviewRow[] {
     role: "Table meaning",
     source: table.qualified_name,
     proposed: table.description?.text ?? table.source_comment ?? "Not established",
+    samples: [`${table.columns.length} columns`, `${table.row_count.toLocaleString()} rows`],
+    lineage: lineageFor(table, "table meaning", table.description),
     consequence: "high",
     claim: table.description,
     ...riskFor(table.description, "high"),
@@ -123,6 +130,9 @@ function rowForColumn(table: TableOutput, column: ColumnOutput): ReviewRow {
     source: columnSummary(column),
     proposed: column.description?.text ?? "No semantic meaning established",
     dataType: column.data_type,
+    samples: samplesFor(column),
+    sampleNote: sampleNoteFor(column),
+    lineage: lineageFor(table, column.name, column.description, column.name),
     consequence,
     claim: column.description,
     ...riskFor(column.description, consequence),
@@ -173,6 +183,39 @@ function matchesRow(row: ReviewRow, filter: Filter): boolean {
 
 function byAttention(a: TableProgress, b: TableProgress): number {
   return b.highlighted - a.highlighted || b.weakTrust - a.weakTrust || a.table.name.localeCompare(b.table.name);
+}
+
+function samplesFor(column: ColumnOutput): string[] {
+  const values = column.sample_values?.map((sample) => `${sample.value} (${sample.count})`) ?? [];
+  if (values.length > 0) return values.slice(0, 5);
+  const range = column.min_value !== undefined && column.max_value !== undefined
+    ? [`${column.min_value} → ${column.max_value}`]
+    : [];
+  return range;
+}
+
+function sampleNoteFor(column: ColumnOutput): string | undefined {
+  if (column.sample_values?.length) return undefined;
+  if (column.values_withheld_reason) {
+    return `${column.values_withheld_reason}. Re-extract with ATLAS_SAMPLE_POLICY=full to show raw samples.`;
+  }
+  if (column.sampled) return "Profiled from a sample of rows.";
+  return "No sample values in this snapshot.";
+}
+
+function lineageFor(
+  table: TableOutput,
+  role: string,
+  claim: Claim | undefined,
+  column?: string,
+): string[] {
+  const source = column ? `${table.qualified_name}.${column}` : table.qualified_name;
+  const lines = [`source: ${source}`];
+  if (claim?.evidence) lines.push(`evidence: ${claim.evidence}`);
+  if (claim?.trust) lines.push(`trust: ${claim.trust.state}, ${Math.round(claim.confidence * 100)}/100`);
+  if (claim) lines.push(`claim: ${claim.text}`);
+  lines.push(`output: semantic_view.yaml → ${table.name}.${role}`);
+  return lines;
 }
 
 function columnSummary(column: ColumnOutput): string {
