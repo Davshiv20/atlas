@@ -299,7 +299,11 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
           ) : (
             <p className="text-body text-ink">{row.proposed}</p>
           )}
-          {trust && <p className="mt-1 text-meta text-ink-3">{trust.detail}</p>}
+          {row.findings[0] ? (
+            <Finding finding={row.findings[0]} />
+          ) : trust ? (
+            <p className="mt-1 text-meta text-ink-3">{trust.detail}</p>
+          ) : null}
           {error && (
             <p className="mt-1 text-meta text-red">
               {describeError(error, "Could not save review.")}
@@ -397,8 +401,15 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
 
       <details className="min-w-[1060px] border-t border-line/70 px-3 py-1.5">
         <summary className="cursor-pointer text-meta font-semibold uppercase tracking-wide text-ink-3">
-          Lineage
+          Why Atlas thinks this
         </summary>
+        {row.findings.length > 0 && (
+          <div className="mt-2 grid gap-2 pb-1">
+            {row.findings.map((finding) => (
+              <Finding key={finding.evidence_id} finding={finding} expanded />
+            ))}
+          </div>
+        )}
         <ol className="mt-2 grid gap-1 pb-1 text-meta text-ink-2">
           {row.lineage.map((line) => (
             <li key={line} className="ident rounded-[--radius-control] bg-raised px-2 py-1">
@@ -408,6 +419,33 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
         </ol>
       </details>
     </article>
+  );
+}
+
+function Finding({
+  finding,
+  expanded = false,
+}: {
+  finding: ReviewLine["findings"][number];
+  expanded?: boolean;
+}) {
+  const bad = finding.relationship === "contradicts" || finding.verdict === "failed";
+  return (
+    <div
+      className={`mt-1 rounded-[--radius-control] border px-2 py-1.5 text-meta ${
+        bad ? "border-red/20 bg-red-soft/60 text-red" : "border-teal/20 bg-teal-soft/60 text-teal-strong"
+      }`}
+    >
+      <p className="font-semibold">{finding.title}</p>
+      <p>{finding.result}</p>
+      {expanded && finding.details.length > 0 && (
+        <ul className="mt-1 list-disc pl-4 text-ink-2">
+          {finding.details.map((detail) => (
+            <li key={detail}>{detail}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

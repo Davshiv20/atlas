@@ -54,6 +54,16 @@ export interface TrustAssessment {
   band: TrustBand;
 }
 
+export interface EvidenceFinding {
+  relationship: string;
+  verdict: string;
+  title: string;
+  result: string;
+  details: string[];
+  evidence_id: string;
+  query_hash?: string;
+}
+
 /** A single assertion, as it appears embedded in the output document. */
 export interface Claim {
   text: string;
@@ -65,6 +75,7 @@ export interface Claim {
   /** True when an executed check could have falsified the claim and did not. */
   grounded: boolean;
   evidence?: string;
+  findings: EvidenceFinding[];
   consequence: Consequence;
 }
 

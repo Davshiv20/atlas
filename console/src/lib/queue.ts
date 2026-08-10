@@ -1,4 +1,4 @@
-import type { Claim, ColumnOutput, Consequence, SchemaOutput, TableOutput } from "@/api/types";
+import type { Claim, ColumnOutput, Consequence, EvidenceFinding, SchemaOutput, TableOutput } from "@/api/types";
 import { claimId, columnClaimId } from "@/lib/review";
 
 /**
@@ -28,6 +28,7 @@ export interface ReviewRow {
   dataType?: string;
   samples: string[];
   sampleNote?: string;
+  findings: EvidenceFinding[];
   lineage: string[];
   consequence: Consequence;
   claim?: Claim;
@@ -95,6 +96,7 @@ function allRows(table: TableOutput): ReviewRow[] {
     source: table.qualified_name,
     proposed: table.grain?.text ?? "Not established",
     samples: [`${table.row_count.toLocaleString()} rows`],
+    findings: table.grain?.findings ?? [],
     lineage: lineageFor(table, "grain", table.grain),
     consequence: "critical",
     claim: table.grain,
@@ -108,6 +110,7 @@ function allRows(table: TableOutput): ReviewRow[] {
     source: table.qualified_name,
     proposed: table.description?.text ?? table.source_comment ?? "Not established",
     samples: [`${table.columns.length} columns`, `${table.row_count.toLocaleString()} rows`],
+    findings: table.description?.findings ?? [],
     lineage: lineageFor(table, "table meaning", table.description),
     consequence: "high",
     claim: table.description,
@@ -132,6 +135,7 @@ function rowForColumn(table: TableOutput, column: ColumnOutput): ReviewRow {
     dataType: column.data_type,
     samples: samplesFor(column),
     sampleNote: sampleNoteFor(column),
+    findings: column.description?.findings ?? [],
     lineage: lineageFor(table, column.name, column.description, column.name),
     consequence,
     claim: column.description,
