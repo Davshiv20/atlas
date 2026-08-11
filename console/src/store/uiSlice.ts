@@ -12,6 +12,7 @@ export interface UiState {
   search: string;
   reviewer: string;
   runningJobId: string | null;
+  runningWorkspace: string | null;
   /**
    * The last run that ended, kept after `runningJobId` clears.
    *
@@ -30,6 +31,7 @@ const initialState: UiState = {
   // every verdict, because an approval with no name attached is not a review.
   reviewer: "you",
   runningJobId: null,
+  runningWorkspace: null,
   finishedJob: null,
   view: "workspace",
 };
@@ -42,6 +44,10 @@ const uiSlice = createSlice({
       state.workspace = action.payload;
       state.table = null;
     },
+    clearWorkspace(state) {
+      state.workspace = null;
+      state.table = null;
+    },
     selectTable(state, action: PayloadAction<string | null>) {
       state.table = action.payload;
     },
@@ -51,17 +57,20 @@ const uiSlice = createSlice({
     setReviewer(state, action: PayloadAction<string>) {
       state.reviewer = action.payload;
     },
-    startJob(state, action: PayloadAction<string>) {
-      state.runningJobId = action.payload;
+    startJob(state, action: PayloadAction<{ id: string; workspace: string }>) {
+      state.runningJobId = action.payload.id;
+      state.runningWorkspace = action.payload.workspace;
       state.finishedJob = null;
     },
     /** Track a run this tab did not start — separate from `startJob` because
      *  adopting one must not clear the summary of the last run it did. */
-    adoptJob(state, action: PayloadAction<string>) {
-      state.runningJobId = action.payload;
+    adoptJob(state, action: PayloadAction<{ id: string; workspace: string }>) {
+      state.runningJobId = action.payload.id;
+      state.runningWorkspace = action.payload.workspace;
     },
     finishJob(state, action: PayloadAction<Job>) {
       state.runningJobId = null;
+      state.runningWorkspace = null;
       state.finishedJob = action.payload;
     },
     dismissFinishedJob(state) {
@@ -75,6 +84,7 @@ const uiSlice = createSlice({
 
 export const {
   selectWorkspace,
+  clearWorkspace,
   selectTable,
   setSearch,
   setReviewer,

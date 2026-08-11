@@ -30,8 +30,10 @@ image builds the console and serves the static output from FastAPI on the same o
 ### Sources
 
 Create a declared source, store or remove its credentials, test the connection, and
-start extraction. Connection health and stored snapshot availability are separate
-concepts, although the UI still needs clearer cached/offline labelling.
+create a source-bound workspace, and start extraction. Connection health and stored
+snapshot availability are separate concepts. A workspace's source binding is immutable:
+PostgreSQL and Snowflake state cannot overwrite one another, and refreshing a snapshot
+requires confirmation before semantic state is reset.
 
 PostgreSQL is established. Snowflake is available as an early adapter for connection,
 reflection, profiling, and typed checks; validate it against the target account before

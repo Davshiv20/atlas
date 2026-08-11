@@ -59,10 +59,11 @@ make dev       # engine on :8000, console on :5173
 make check     # lint, engine tests, console typecheck, production build
 ```
 
-Add a PostgreSQL source from the console's **Sources** view. Atlas stores UI-managed
-credentials in `engine/.secrets.env`, which is gitignored. For headless use, provide a
-connection URL through the source's configured environment variable or
-`ATLAS_DATABASE_URL`.
+Add PostgreSQL and Snowflake sources from the console's **Sources** view. Atlas stores
+UI-managed credentials in `engine/.secrets.env`, which is gitignored. Each workspace is
+bound permanently to one declared source, so adding or refreshing Snowflake cannot
+replace PostgreSQL state. For headless use, provide each source URL through its configured
+environment variable.
 
 Always use a database role with `SELECT` and nothing else.
 
@@ -100,17 +101,16 @@ container is replaced.
 Workspace state is currently file-backed under `ATLAS_OUTPUT_DIR`:
 
 ```text
-<workspace>/snapshot.yaml
-<workspace>/facts.yaml
-<workspace>/evidence.yaml
-<workspace>/questions.yaml
-<workspace>/output.yaml
+<workspace>/workspace.yaml                 # immutable source + active generation
+<workspace>/generations/<n>/snapshot.yaml
+<workspace>/generations/<n>/facts.yaml
+<workspace>/generations/<n>/evidence.yaml
+<workspace>/generations/<n>/questions.yaml
+<workspace>/generations/<n>/output.yaml
 ```
 
-This is inspectable and useful during product development, but it is not the intended
-multi-user storage model. The next persistence step is an Atlas-owned PostgreSQL
-control-plane database behind a `MetadataRepository` port. YAML should then become an
-export/archive format rather than the source of truth.
+This inspectable file-backed design supports one trusted Atlas installation with multiple
+independent data sources. It is not a multi-tenant or multi-instance storage model.
 
 A stored snapshot can exist while its source is disconnected. The console must treat
 connection health and snapshot availability as separate states.

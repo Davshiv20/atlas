@@ -33,11 +33,6 @@ class Settings(BaseSettings):
     # measured optimum — raise it once you have watched a real source cope.
     atlas_max_workers: int = Field(default=6, ge=1, le=32)
 
-    # --- target database ---------------------------------------------------
-    # The database being catalogued. Should be a role with SELECT and nothing
-    # else; the in-process guards are a second line of defence, not the first.
-    atlas_database_url: str | None = None
-
     # --- sample values -----------------------------------------------------
     # "strict" withholds anything sensitive-looking, opaque, free-text, or
     # high-cardinality. "full" emits every value the profiler collected.
@@ -79,11 +74,6 @@ class Settings(BaseSettings):
         if self.openrouter_api_key is None:
             raise RuntimeError("OPENROUTER_API_KEY is not set (put it in .env or the environment)")
         return self.openrouter_api_key.get_secret_value()
-
-    def require_database_url(self) -> str:
-        if self.atlas_database_url is None:
-            raise RuntimeError("ATLAS_DATABASE_URL is not set (put it in .env or pass --url)")
-        return self.atlas_database_url
 
 
 @lru_cache

@@ -350,9 +350,88 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
+                  "additionalProperties": {
+                    "items": {
+                      "$ref": "#/components/schemas/WorkspaceSummary"
+                    },
+                    "type": "array"
+                  },
                   "type": "object",
                   "title": "Response List Workspaces Workspaces Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Create Workspace",
+        "operationId": "create_workspace_workspaces_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkspaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspaces/{name}": {
+      "delete": {
+        "tags": [
+          "workspaces"
+        ],
+        "summary": "Delete Workspace",
+        "operationId": "delete_workspace_workspaces__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -366,7 +445,7 @@
           "pipeline"
         ],
         "summary": "Extract",
-        "description": "Capture the physical layer. Deterministic; no model involved.",
+        "description": "Capture the physical layer for the workspace's bound source.",
         "operationId": "extract_workspaces__name__extract_post",
         "parameters": [
           {
@@ -385,7 +464,8 @@
               "schema": {
                 "$ref": "#/components/schemas/ExtractRequest",
                 "default": {
-                  "profile": true
+                  "profile": true,
+                  "reset_semantics": false
                 }
               }
             }
@@ -1019,17 +1099,6 @@
     "schemas": {
       "AnalyzeRequest": {
         "properties": {
-          "database_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Database Url"
-          },
           "limit": {
             "anyOf": [
               {
@@ -1066,6 +1135,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "AnalyzeRequest"
       },
@@ -1160,6 +1230,24 @@
         "title": "Consequence",
         "description": "What breaks downstream if the claim is wrong."
       },
+      "CreateWorkspaceRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_id"
+        ],
+        "title": "CreateWorkspaceRequest"
+      },
       "CredentialRequest": {
         "properties": {
           "url": {
@@ -1177,48 +1265,19 @@
       },
       "ExtractRequest": {
         "properties": {
-          "source_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Id",
-            "description": "A source declared in sources.yaml"
-          },
-          "database_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Database Url",
-            "description": "Direct URL. Falls back to ATLAS_DATABASE_URL."
-          },
-          "schema_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Schema Name",
-            "description": "Overrides the source's namespace"
-          },
           "profile": {
             "type": "boolean",
             "title": "Profile",
             "default": true
+          },
+          "reset_semantics": {
+            "type": "boolean",
+            "title": "Reset Semantics",
+            "description": "Required when refreshing a workspace that already has semantic state.",
+            "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "ExtractRequest"
       },
@@ -1354,6 +1413,39 @@
           "workspace": {
             "type": "string",
             "title": "Workspace"
+          },
+          "snapshot_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Generation"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "workspace_incarnation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Incarnation"
           },
           "status": {
             "$ref": "#/components/schemas/JobStatus",
@@ -1957,6 +2049,95 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "adapter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adapter"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "source_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Label"
+          },
+          "snapshot_generation": {
+            "type": "integer",
+            "title": "Snapshot Generation"
+          },
+          "snapshot_available": {
+            "type": "boolean",
+            "title": "Snapshot Available"
+          },
+          "snapshot_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Time"
+          },
+          "source_available": {
+            "type": "boolean",
+            "title": "Source Available"
+          },
+          "source_configured": {
+            "type": "boolean",
+            "title": "Source Configured",
+            "default": false
+          },
+          "source_health": {
+            "$ref": "#/components/schemas/ConnectionHealth",
+            "default": {
+              "state": "unknown"
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_id",
+          "snapshot_generation",
+          "snapshot_available",
+          "source_available"
+        ],
+        "title": "WorkspaceSummary"
       }
     }
   }

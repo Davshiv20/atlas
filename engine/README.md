@@ -24,13 +24,12 @@ API documentation is available at `http://localhost:8000/docs`.
 
 ```bash
 uv run atlas preflight
-uv run atlas extract elara \
-  --url "postgresql+psycopg://user:pass@host/database" \
-  --schema public
-uv run atlas summary elara
-uv run atlas analyze elara --limit 3
-uv run atlas claims elara
-uv run atlas compile elara --markdown out/elara/report.md
+uv run atlas create-workspace elara-review elara
+uv run atlas extract elara-review
+uv run atlas summary elara-review
+uv run atlas analyze elara-review --limit 3
+uv run atlas claims elara-review
+uv run atlas compile elara-review --markdown out/elara-review/report.md
 ```
 
 Extraction is deterministic and does not call a model. Analysis uses the configured
@@ -123,40 +122,41 @@ sources:
     namespace: public
 ```
 
-Connection strings come from either:
-
-- an environment variable;
-- `ATLAS_DATABASE_URL` for headless CLI use; or
-- `.secrets.env` when entered through the console.
+Connection strings come from either the declared source's environment variable or
+`.secrets.env` when entered through the console. Extraction and analysis never accept a
+per-run URL or namespace override; they resolve the immutable source binding from the
+workspace manifest.
 
 `.secrets.env`, `.env`, and workspace outputs are gitignored. Never commit customer
 credentials or extracted customer metadata.
 
 ## Current workspace storage
 
-Per-workspace state lives under `ATLAS_OUTPUT_DIR` (`out/` by default):
+Per-workspace state lives under `ATLAS_OUTPUT_DIR` (`out/` by default). The manifest
+atomically points to one complete generation; prior generations remain recoverable:
 
 | File | Current role |
 |---|---|
-| `snapshot.yaml` | Physical structure and profiles captured from the source. |
-| `facts.yaml` | Semantic claims and review decisions. |
-| `evidence.yaml` | Immutable observations and claim-evidence links. |
-| `questions.yaml` | Business questions and reviewer answers. |
-| `output.yaml` | Derived review/output document. Never edit directly. |
+| `workspace.yaml` | Immutable source binding and active snapshot generation. |
+| `generations/<n>/snapshot.yaml` | Physical structure and profiles captured from the source. |
+| `generations/<n>/facts.yaml` | Semantic claims and review decisions. |
+| `generations/<n>/evidence.yaml` | Immutable observations and claim-evidence links. |
+| `generations/<n>/questions.yaml` | Business questions and reviewer answers. |
+| `generations/<n>/output.yaml` | Derived review/output document. Never edit directly. |
 
 The API rebuilds output from snapshot, claims, and questions when it is read. A cached
 `output.yaml` is an export, not the authoritative state.
 
-This file-backed repository is temporary. The intended product datastore is an
-Atlas-owned PostgreSQL control plane behind a `MetadataRepository` port, with YAML kept
-for export or archival use.
+This file-backed repository supports one trusted Atlas installation. PostgreSQL and
+Snowflake remain isolated in separate source-bound workspaces; it is not a multi-tenant
+or multi-instance design.
 
 ## HTTP surfaces
 
 The API currently provides:
 
 - source creation, credential management, probing, and deletion;
-- workspace listing;
+- source-bound workspace creation, listing, refresh, and deletion;
 - extraction and analysis jobs;
 - derived output and semantic-view reads;
 - claim review;
@@ -176,7 +176,6 @@ refetches workspace output as completed tables are persisted.
 | `ATLAS_EFFORT` | `medium` |
 | `ATLAS_MAX_TURNS` | `40` |
 | `ATLAS_MAX_WORKERS` | `6` |
-| `ATLAS_DATABASE_URL` | Optional headless fallback source URL. |
 | `ATLAS_MAX_ROWS` | `50` |
 | `ATLAS_STATEMENT_TIMEOUT_MS` | `15000` |
 | `ATLAS_OUTPUT_DIR` | `out` |
