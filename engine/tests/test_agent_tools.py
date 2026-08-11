@@ -108,14 +108,14 @@ def test_there_is_no_generic_sql_tool(wired) -> None:
 
 def test_a_check_returns_an_evidence_id(wired) -> None:
     tools, sink, _ = wired
-    result = tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+    result = tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     assert result.startswith("evidence:")
     assert len(sink.evidence.records) == 1
 
 
 def test_the_agent_proposes_parameters_not_sql(wired) -> None:
     tools, _, adapter = wired
-    tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+    tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     assert adapter.calls[0].key_fields == ["id"]
 
 
@@ -124,13 +124,7 @@ def test_the_agent_proposes_parameters_not_sql(wired) -> None:
 
 def test_a_fabricated_evidence_id_is_refused(wired) -> None:
     tools, sink, _ = wired
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables",
-            "aspect": "grain",
-            "claim": "One row per deliverable.",
-            "evidence_ids": ["evidence:madeup"],
-        }
+    result = tools["record_claim"](subject="deliverables", aspect="grain", claim="One row per deliverable.", evidence_ids=["evidence:madeup"]
     )
     assert "REJECTED" in result
     assert sink.facts == []
@@ -140,13 +134,7 @@ def test_a_consequential_claim_cannot_be_recorded_without_evidence(wired) -> Non
     """The escape hatch that produced 76 unbacked claims: the agent could
     previously drop the citation and save the claim anyway."""
     tools, sink, _ = wired
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables",
-            "aspect": "grain",
-            "claim": "One row per deliverable.",
-            "evidence_ids": [],
-        }
+    result = tools["record_claim"](subject="deliverables", aspect="grain", claim="One row per deliverable.", evidence_ids=[]
     )
     assert "REJECTED" in result
     assert "without supporting evidence" in result
@@ -156,15 +144,9 @@ def test_a_consequential_claim_cannot_be_recorded_without_evidence(wired) -> Non
 def test_a_grounded_claim_is_recorded_with_a_computed_confidence(wired) -> None:
     tools, sink, _ = wired
     evidence = evidence_id_from(
-        tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     )
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables",
-            "aspect": "grain",
-            "claim": "One row per deliverable.",
-            "evidence_ids": [evidence],
-        }
+    result = tools["record_claim"](subject="deliverables", aspect="grain", claim="One row per deliverable.", evidence_ids=[evidence]
     )
     assert "Recorded" in result
     fact = sink.facts[0]
@@ -174,7 +156,7 @@ def test_a_grounded_claim_is_recorded_with_a_computed_confidence(wired) -> None:
 
 def test_the_model_cannot_choose_its_own_confidence(wired) -> None:
     tools, _, _ = wired
-    assert "confidence" not in tools["record_claim"].parameters["properties"]
+    assert "confidence" not in tools["record_claim"].args
 
 
 def test_a_failed_check_links_as_contradicting() -> None:
@@ -190,27 +172,16 @@ def test_a_failed_check_links_as_contradicting() -> None:
         }
     )
     evidence = evidence_id_from(
-        tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     )
-    tools["record_claim"].call(
-        {
-            "subject": "deliverables",
-            "aspect": "grain",
-            "claim": "One row per deliverable.",
-            "evidence_ids": [evidence],
-        }
+    tools["record_claim"](subject="deliverables", aspect="grain", claim="One row per deliverable.", evidence_ids=[evidence]
     )
     assert len(sink.evidence.contradictions("deliverables#grain")) == 1
 
 
 def test_questions_remain_available_when_no_check_can_settle_it(wired) -> None:
     tools, sink, _ = wired
-    tools["ask_human"].call(
-        {
-            "subject": "deliverables.process_id_ref",
-            "question": "One identifier space or several?",
-            "evidence": "P1, PR-02, P001, Inc-1",
-        }
+    tools["ask_human"](subject="deliverables.process_id_ref", question="One identifier space or several?", evidence="P1, PR-02, P001, Inc-1"
     )
     assert sink.questions[0].subject == "deliverables.process_id_ref"
 
@@ -218,15 +189,9 @@ def test_questions_remain_available_when_no_check_can_settle_it(wired) -> None:
 def test_routine_claims_are_auto_accepted_when_grounded(wired) -> None:
     tools, sink, _ = wired
     evidence = evidence_id_from(
-        tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     )
-    tools["record_claim"].call(
-        {
-            "subject": "deliverables.id",
-            "aspect": "semantics",
-            "claim": "Surrogate primary key.",
-            "evidence_ids": [evidence],
-        }
+    tools["record_claim"](subject="deliverables.id", aspect="semantics", claim="Surrogate primary key.", evidence_ids=[evidence]
     )
     assert sink.facts[0].status is FactStatus.AUTO_ACCEPTED
 
@@ -253,35 +218,58 @@ def test_render_separates_shape_determined_columns() -> None:
 # --- a truncated reading says so -------------------------------------------
 
 
+def scripted_react(*calls: str):
+    """A ReAct that made exactly these tool calls and then stopped.
+
+    Patched in where the real loop would run, so `analyze_table`'s reading of
+    the trajectory is tested without a model. Ending on "finish" is the only
+    thing that distinguishes a completed reading from one cut off by the
+    ceiling — the old loop could not tell them apart at all.
+    """
+    import dspy
+
+    class Scripted:
+        def __init__(self, signature, tools, max_iters=20):
+            self.tools = tools
+
+        def __call__(self, **inputs):
+            trajectory = {f"tool_name_{i}": name for i, name in enumerate(calls)}
+            return dspy.Prediction(trajectory=trajectory, summary="scripted")
+
+    return Scripted
+
+
 def test_the_turn_ceiling_is_reported_not_swallowed(monkeypatch) -> None:
     """A run cut off mid-way looks identical to a thorough one from outside.
     One observed run spent every turn on checks and recorded no claims, and the
     job still reported success."""
     from atlas import agent
 
-    monkeypatch.setattr(agent, "run_tool_loop", lambda *a, **k: True)
-    sink = agent.analyze_table(object(), ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
+    monkeypatch.setattr(agent.dspy, "ReAct", scripted_react("run_grain_check"))
+    sink = agent.analyze_table(ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
     assert sink.truncated is True
+    assert sink.trajectory == ["run_grain_check"]
 
 
 def test_a_completed_reading_is_not_marked_partial(monkeypatch) -> None:
     from atlas import agent
 
-    monkeypatch.setattr(agent, "run_tool_loop", lambda *a, **k: False)
-    sink = agent.analyze_table(object(), ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
+    monkeypatch.setattr(agent.dspy, "ReAct", scripted_react("run_grain_check", "finish"))
+    sink = agent.analyze_table(ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
     assert sink.truncated is False
 
 
 def test_progress_callbacks_name_the_table_under_way(monkeypatch) -> None:
     from atlas import agent
 
-    monkeypatch.setattr(agent, "run_tool_loop", lambda *a, **k: True)
+    monkeypatch.setattr(
+        agent, "analyze_table", lambda *a, **k: agent.AnalysisSink(truncated=True)
+    )
     started: list[str] = []
     done: list[tuple[str, bool]] = []
     agent.analyze_schema(
         ScriptedAdapter(),
         make_snapshot(),
-        client=object(),
         tables=["deliverables"],
         on_table_start=started.append,
         # The sink comes back so the caller can persist this table now rather
@@ -309,15 +297,9 @@ def test_evidence_about_another_column_is_refused() -> None:
     be scored on it: existence was the only thing checked."""
     tools, sink, _ = wire({"distribution": DISTRIBUTION})
     evidence = evidence_id_from(
-        tools["run_distribution_check"].call({"relation": "deliverables", "field": "stage"})
+        tools["run_distribution_check"](relation="deliverables", field="stage")
     )
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables.id",
-            "aspect": "semantics",
-            "claim": "Surrogate primary key.",
-            "evidence_ids": [evidence],
-        }
+    result = tools["record_claim"](subject="deliverables.id", aspect="semantics", claim="Surrogate primary key.", evidence_ids=[evidence]
     )
     assert "REJECTED" in result
     assert "deliverables.stage" in result
@@ -329,15 +311,9 @@ def test_a_distribution_supports_a_claim_about_its_own_column() -> None:
     it was being filed as contradicting the claim it was run to inform."""
     tools, sink, _ = wire({"distribution": DISTRIBUTION})
     evidence = evidence_id_from(
-        tools["run_distribution_check"].call({"relation": "deliverables", "field": "stage"})
+        tools["run_distribution_check"](relation="deliverables", field="stage")
     )
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables.stage",
-            "aspect": "semantics",
-            "claim": "The workflow stage of the deliverable.",
-            "evidence_ids": [evidence],
-        }
+    result = tools["record_claim"](subject="deliverables.stage", aspect="semantics", claim="The workflow stage of the deliverable.", evidence_ids=[evidence]
     )
     assert "Recorded" in result
     fact = sink.facts[0]
@@ -353,15 +329,9 @@ def test_relation_scoped_evidence_still_bears_on_a_column() -> None:
     claim — the relevance rule must not reject it."""
     tools, sink, _ = wire({"grain": CLEAN_GRAIN})
     evidence = evidence_id_from(
-        tools["run_grain_check"].call({"relation": "deliverables", "key_fields": ["id"]})
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
     )
-    result = tools["record_claim"].call(
-        {
-            "subject": "deliverables.id",
-            "aspect": "semantics",
-            "claim": "Surrogate primary key.",
-            "evidence_ids": [evidence],
-        }
+    result = tools["record_claim"](subject="deliverables.id", aspect="semantics", claim="Surrogate primary key.", evidence_ids=[evidence]
     )
     assert "Recorded" in result
     assert sink.facts[0].confidence > 0.6
@@ -397,16 +367,15 @@ def test_tables_are_read_at_the_same_time(monkeypatch) -> None:
 
     started = threading.Barrier(3, timeout=5)
 
-    def blocking(*args, **kwargs):
+    def blocking(adapter, snapshot, table, relationships=None):
         # Only completes if three workers reach it together.
         started.wait()
-        return False
+        return agent.AnalysisSink()
 
-    monkeypatch.setattr(agent, "run_tool_loop", blocking)
+    monkeypatch.setattr(agent, "analyze_table", blocking)
     agent.analyze_schema(
         ScriptedAdapter(),
         _snapshot_of("a", "b", "c"),
-        client=object(),
         workers=3,
     )  # a timeout here means the reads were serialised
 
@@ -421,7 +390,7 @@ def test_the_worker_count_is_bounded(monkeypatch) -> None:
     peak = 0
     guard = threading.Lock()
 
-    def counting(*args, **kwargs):
+    def counting(adapter, snapshot, table, relationships=None):
         nonlocal live, peak
         with guard:
             live += 1
@@ -429,11 +398,11 @@ def test_the_worker_count_is_bounded(monkeypatch) -> None:
         time.sleep(0.02)
         with guard:
             live -= 1
-        return False
+        return agent.AnalysisSink()
 
-    monkeypatch.setattr(agent, "run_tool_loop", counting)
+    monkeypatch.setattr(agent, "analyze_table", counting)
     agent.analyze_schema(
-        ScriptedAdapter(), _snapshot_of(*"abcdefgh"), client=object(), workers=2
+        ScriptedAdapter(), _snapshot_of(*"abcdefgh"), workers=2
     )
 
     assert peak <= 2
@@ -445,18 +414,17 @@ def test_results_do_not_depend_on_which_worker_finishes_first(monkeypatch) -> No
 
     order: list[str] = []
 
-    def slow_for_the_first(client, system, user, tools, on_text=None):
-        name = user.split()[1].split(".")[-1]
+    def slow_for_the_first(adapter, snapshot, table, relationships=None):
+        name = table.name
         time.sleep(0.05 if name == "a" else 0.0)
         order.append(name)
-        return False
+        return agent.AnalysisSink()
 
-    monkeypatch.setattr(agent, "run_tool_loop", slow_for_the_first)
+    monkeypatch.setattr(agent, "analyze_table", slow_for_the_first)
     done: list[str] = []
     agent.analyze_schema(
         ScriptedAdapter(),
         _snapshot_of("a", "b", "c"),
-        client=object(),
         workers=3,
         on_table_done=lambda name, sink: done.append(name),
     )
@@ -488,13 +456,68 @@ def test_persistence_is_never_concurrent(monkeypatch) -> None:
         with guard:
             inside -= 1
 
-    monkeypatch.setattr(agent, "run_tool_loop", lambda *a, **k: False)
+    monkeypatch.setattr(agent, "analyze_table", lambda *a, **k: agent.AnalysisSink())
     agent.analyze_schema(
         ScriptedAdapter(),
         _snapshot_of(*"abcdef"),
-        client=object(),
         workers=6,
         on_table_done=absorbing,
     )
 
     assert not overlapping
+
+
+# --- the model's identifiers are normalised, not policed --------------------
+
+
+def test_evidence_cited_by_its_bare_hash_is_accepted(wired) -> None:
+    """Under DSPy the model cites `819416b1…` about as often as
+    `evidence:819416b1…`. Four claims in one run were rejected over the
+    prefix alone."""
+    tools, sink, _ = wired
+    full = evidence_id_from(
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
+    )
+    bare = full.removeprefix("evidence:")
+
+    result = tools["record_claim"](
+        subject="deliverables",
+        aspect="grain",
+        claim="One row per deliverable.",
+        evidence_ids=[bare],
+    )
+
+    assert "Recorded" in result
+    assert sink.rejections == []
+
+
+def test_a_schema_qualified_subject_is_the_same_subject(wired) -> None:
+    """The rendered table carries its qualified name, so the model echoes it
+    back. Two ids for one column never merge."""
+    tools, sink, _ = wired
+    evidence = evidence_id_from(
+        tools["run_grain_check"](relation="deliverables", key_fields=["id"])
+    )
+    tools["record_claim"](
+        subject="public.deliverables",
+        aspect="grain",
+        claim="One row per deliverable.",
+        evidence_ids=[evidence],
+    )
+
+    assert sink.facts[0].id == "deliverables#grain"
+
+
+def test_a_refusal_says_why_it_refused(wired) -> None:
+    """A run that records nothing has to leave a reason behind. The trajectory
+    shows `record_claim` was called; only this says it was turned away."""
+    tools, sink, _ = wired
+    tools["record_claim"](
+        subject="deliverables",
+        aspect="grain",
+        claim="One row per deliverable.",
+        evidence_ids=["evidence:madeup"],
+    )
+
+    assert len(sink.rejections) == 1
+    assert "no such evidence" in sink.rejections[0]

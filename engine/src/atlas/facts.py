@@ -42,7 +42,44 @@ PLURAL_ASPECTS = frozenset({"join", "quality", "metric", "lifecycle"})
 
 # Discriminators become part of a URL path segment and of a stable identity, so
 # they are constrained rather than free text.
+DISCRIMINATOR_MAX_LENGTH = 64
 DISCRIMINATOR = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+
+
+def discriminator_from(raw: str) -> str:
+    """Turn arbitrary text into a discriminator the model will accept.
+
+    One encoding, in one place, because a discriminator *is* an identity. Two
+    call sites that slugify slightly differently mint two ids for one claim,
+    and `FactStore.merge` resolves an id collision by keeping the last writer —
+    so a divergent encoder does not raise, it loses claims quietly.
+
+    Identifiers arrive from someone else's schema and cannot be assumed
+    lowercase, short, or alphanumeric. A name that survives cleaning untouched
+    stays readable, because a legible id is worth something to whoever reads
+    the catalogue. Anything rewritten or truncated carries a digest of the
+    original instead: `Users.created_by` and `users.created_by` are two
+    relationships, and case-folding alone would silently collapse them into
+    one.
+    """
+    cleaned = re.sub(r"[^a-z0-9._-]", "-", raw.lower()).lstrip("._-")
+    if cleaned == raw and len(cleaned) <= DISCRIMINATOR_MAX_LENGTH:
+        return cleaned
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:8]
+    if not cleaned:
+        return f"ref-{digest}"
+    return f"{cleaned[: DISCRIMINATOR_MAX_LENGTH - 9]}-{digest}"
+
+
+def join_discriminator(target_relation: str, source_fields: list[str]) -> str:
+    """The discriminator identifying one join claim.
+
+    Lives here rather than in `relationships` because the output builder has to
+    recompute it to match a declared foreign key against the claim describing
+    it. Two independent derivations of one identity is the same hazard
+    `discriminator_from` exists to close, one level up.
+    """
+    return discriminator_from(f"{target_relation}.{'_'.join(source_fields)}")
 
 
 class ProvenanceKind(StrEnum):

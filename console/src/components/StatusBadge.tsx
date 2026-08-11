@@ -7,7 +7,9 @@ import type { ClaimStatus, ReviewState } from "@/api/types";
  * for sighted users only, and this is the interface's primary signal.
  */
 const TONE = {
-  generated: "bg-violet-soft text-violet-strong border-violet/30",
+  // Not "generated": every claim here was authored by the model, including the
+  // ones that passed a check. This tone marks a claim nothing has settled yet.
+  unsettled: "bg-violet-soft text-violet-strong border-violet/30",
   validated: "bg-teal-soft text-teal-strong border-teal/25",
   review: "bg-amber-soft text-amber-strong border-amber/30",
   failed: "bg-red-soft text-red border-red/25",
@@ -46,7 +48,11 @@ const CLAIM_TONE: Record<ClaimStatus, { tone: Tone; label: string; title?: strin
     title:
       "Accepted without human review: routine column with a strong evidence-derived trust score. Not verified.",
   },
-  unverified: { tone: "generated", label: "AI generated" },
+  // "Unreviewed", not "AI generated": this status says no human has decided,
+  // which is orthogonal to whether evidence exists. A grounded claim awaiting
+  // review has a passing check under it, and calling that "AI generated" reads
+  // as "unsupported" about the one thing that is supported.
+  unverified: { tone: "unsettled", label: "Unreviewed" },
   rejected: { tone: "failed", label: "Rejected" },
 };
 

@@ -90,7 +90,13 @@ function allRows(table: TableOutput): ReviewRow[] {
   const rows: ReviewRow[] = [];
 
   rows.push({
-    id: claimId(table.name, "grain"),
+    // The claim's own id when there is one. Reconstructing it from subject and
+    // aspect addressed a claim that did not exist whenever the engine picked a
+    // different aspect for the description — `unit` beat `semantics` on any
+    // column whose meaning is a measure, and reviewing it returned 404. The
+    // reconstructed form survives only as a key for rows with no claim to
+    // address, which are exactly the rows that cannot be reviewed anyway.
+    id: table.grain?.id ?? claimId(table.name, "grain"),
     table: table.name,
     role: "Grain",
     source: table.qualified_name,
@@ -104,7 +110,7 @@ function allRows(table: TableOutput): ReviewRow[] {
   });
 
   rows.push({
-    id: claimId(table.name, "semantics"),
+    id: table.description?.id ?? claimId(table.name, "semantics"),
     table: table.name,
     role: "Table meaning",
     source: table.qualified_name,
@@ -127,7 +133,7 @@ function allRows(table: TableOutput): ReviewRow[] {
 function rowForColumn(table: TableOutput, column: ColumnOutput): ReviewRow {
   const consequence = column.consequence;
   return {
-    id: columnClaimId(table.name, column.name),
+    id: column.description?.id ?? columnClaimId(table.name, column.name),
     table: table.name,
     role: column.name,
     source: columnSummary(column),

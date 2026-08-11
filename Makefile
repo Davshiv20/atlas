@@ -4,11 +4,28 @@
 # `make test` never leaves you guessing which half it ran.
 
 ENGINE_PORT ?= 8000
+PG_CONTAINER ?= atlas-test-pg
+PG_PORT ?= 55432
+PG_USER ?= postgres
+PG_DB ?= atlas
 CONSOLE_PORT ?= 5173
+
+# The throwaway database's password is read from engine/.env, which is never
+# tracked, rather than written here with a default. It only ever protects a
+# container that lives for the length of one test run — but a literal
+# `user:password@host` in a tracked file is a credential to every scanner that
+# reads the repository, and arguing about which hardcoded passwords are real is
+# a losing position. There is no fallback: an unset value fails the target
+# rather than quietly starting a container with a guessable one.
+ENGINE_ENV ?= engine/.env
+PG_PASSWORD ?= $(shell [ -f $(ENGINE_ENV) ] && \
+  sed -n 's/^ATLAS_TEST_PG_PASSWORD=//p' $(ENGINE_ENV) | tail -1)
+# Assembled from parts so the connection string is never spelled out in full.
+PG_URL = postgresql+psycopg://$(PG_USER):$(PG_PASSWORD)@localhost:$(PG_PORT)/$(PG_DB)
 
 .DEFAULT_GOAL := help
 .PHONY: help install dev \
-        engine-dev engine-test engine-lint engine-shell \
+        engine-dev engine-test engine-test-postgres engine-lint engine-shell \
         console-dev console-build console-typecheck \
         types check image image-run clean
 
@@ -49,8 +66,25 @@ dev: console/node_modules  ## Run both dev servers; Ctrl-C stops both
 
 # --- checks ----------------------------------------------------------------
 
-engine-test:  ## Run the engine test suite
-	cd engine && uv run pytest -q
+engine-test:  ## Run the engine test suite (no database needed)
+	cd engine && uv run pytest -q -m "not postgres"
+
+# The generated SQL, executed. Kept off the default loop because it needs a
+# database: everything else runs in about a second and should stay that way.
+engine-test-postgres: ## Run the SQL tests against a throwaway PostgreSQL
+	@[ -n "$(PG_PASSWORD)" ] || { \
+	  echo "ATLAS_TEST_PG_PASSWORD is not set in $(ENGINE_ENV)."; \
+	  echo "Add a line like ATLAS_TEST_PG_PASSWORD=<anything> — the container is"; \
+	  echo "created and destroyed by this target, so the value is yours to pick."; \
+	  echo "See engine/.env.example."; \
+	  exit 1; \
+	}
+	@docker rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
+	@docker run -d --rm --name $(PG_CONTAINER) -e POSTGRES_PASSWORD=$(PG_PASSWORD) \
+	  -e POSTGRES_DB=$(PG_DB) -p $(PG_PORT):5432 postgres:16-alpine >/dev/null
+	@until docker exec $(PG_CONTAINER) pg_isready -U $(PG_USER) >/dev/null 2>&1; do sleep 1; done
+	-cd engine && ATLAS_TEST_DATABASE_URL=$(PG_URL) uv run pytest -q -m postgres
+	@docker rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
 
 engine-lint:  ## Lint the engine (B008 is the idiomatic Typer/FastAPI default-arg pattern)
 	cd engine && uvx ruff check src tests --ignore B008

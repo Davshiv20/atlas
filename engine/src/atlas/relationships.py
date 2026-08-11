@@ -27,7 +27,6 @@ schema instead of inventing it.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 from collections import Counter, defaultdict
@@ -49,7 +48,14 @@ from atlas.evidence import (
     Scope,
     Verdict,
 )
-from atlas.facts import Consequence, Fact, FactStatus, Provenance, ProvenanceKind
+from atlas.facts import (
+    Consequence,
+    Fact,
+    FactStatus,
+    Provenance,
+    ProvenanceKind,
+    join_discriminator,
+)
 from atlas.policy import Trust, assess
 from atlas.snapshot import Enforcement, Snapshot, Table
 
@@ -418,26 +424,6 @@ def _constraint_assertion(candidate: Candidate) -> Assertion:
 #: What `facts.DISCRIMINATOR` accepts. Mirrored rather than imported as a regex
 #: because the constraint is the model's; this only has to produce something it
 #: will take.
-_DISCRIMINATOR_MAX = 64
-
-
-def _discriminator(candidate: Candidate) -> str:
-    """A claim id fragment the fact model will accept.
-
-    Built from identifiers that come from someone else's schema, so it cannot
-    be trusted to be lowercase or short: a `Users` table, or a long
-    table-plus-column pair, produced a value the validator rejected — and
-    because `as_claims` has no guard, that raised inside the analyze job and
-    aborted the whole run before a single table was read.
-    """
-    raw = f"{candidate.target_relation}.{'_'.join(candidate.source_fields)}".lower()
-    cleaned = re.sub(r"[^a-z0-9._-]", "-", raw).lstrip("._-") or "ref"
-    if len(cleaned) <= _DISCRIMINATOR_MAX:
-        return cleaned
-    # Truncating alone would collide two long names that share a prefix, so the
-    # tail carries a digest of what was cut.
-    digest = hashlib.sha256(cleaned.encode()).hexdigest()[:8]
-    return f"{cleaned[: _DISCRIMINATOR_MAX - 9]}-{digest}"
 
 
 def as_claims(discovery: Discovery) -> tuple[list[Fact], list[ClaimEvidence]]:
@@ -459,7 +445,9 @@ def as_claims(discovery: Discovery) -> tuple[list[Fact], list[ClaimEvidence]]:
         # The target alone is not a relationship: `clients.created_by` and
         # `clients.updated_by` both reference `users`, and keying on the target
         # collapses them into one claim that can only be reviewed once.
-        discriminator = _discriminator(candidate)
+        discriminator = join_discriminator(
+            candidate.target_relation, candidate.source_fields
+        )
         claim_id = f"{candidate.source_relation}#join#{discriminator}"
         record = discovery.evidence.by_id(relationship.evidence_id)
         if record is None:  # every settled relationship minted its own record

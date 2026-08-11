@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Grounded business-context catalogue generator for unfamiliar database schemas"
 requires-python = ">=3.12"
 dependencies = [
+    "dspy>=3.3.0",
     "fastapi>=0.141.1",
     "openai>=2.50.0",
     "psycopg[binary]>=3.2",
@@ -33,6 +34,12 @@ reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::DeprecationWarning"]
+# Tests that execute generated SQL against a real PostgreSQL. Deselected by
+# default so the everyday loop needs no database; `make engine-test-postgres`
+# starts one and runs them.
+markers = [
+    "postgres: requires a live PostgreSQL at ATLAS_TEST_DATABASE_URL",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,117 +1,58 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import dspy
+import pytest
 
-from atlas.llm import Tool, run_tool_loop
+from atlas.llm import build_lm, configure
 from atlas.settings import get_settings
 
-
-class FakeMessage(SimpleNamespace):
-    def model_dump(self, exclude_none: bool = False) -> dict:
-        return {"role": "assistant", "content": self.content}
-
-
-def message(content=None, tool_calls=None) -> FakeMessage:
-    return FakeMessage(content=content, tool_calls=tool_calls or [])
+# The loop itself is DSPy's now — bounded iteration, tool dispatch, and
+# returning a tool's exception to the model as an observation are all `ReAct`
+# behaviours and are tested there. What stays ours is how the model is named
+# and bound, and both have silent failure modes: a missing provider prefix
+# routes to a different vendor, and an unbound LM only fails once a run starts.
 
 
-def tool_call(name: str, arguments: str, call_id: str = "call_1") -> SimpleNamespace:
-    return SimpleNamespace(
-        id=call_id, function=SimpleNamespace(name=name, arguments=arguments)
-    )
+@pytest.fixture(autouse=True)
+def _settings(monkeypatch, tmp_path):
+    # Settings read `.env` relative to the working directory, so without the
+    # chdir a developer with a populated engine/.env sees different results
+    # than CI — and "no key configured" is untestable because there is one.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("ATLAS_MODEL", "qwen/qwen3.7-plus")
+    monkeypatch.setenv("ATLAS_EFFORT", "medium")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
-class FakeClient:
-    """Replays a scripted sequence of assistant messages."""
-
-    def __init__(self, script: list[FakeMessage]) -> None:
-        self.script = list(script)
-        self.calls: list[dict] = []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **kwargs):
-        self.calls.append(kwargs)
-        nxt = self.script.pop(0) if self.script else message(content="done")
-        return SimpleNamespace(choices=[SimpleNamespace(message=nxt)])
+def test_the_model_is_routed_through_openrouter() -> None:
+    """LiteLLM takes the provider from a prefix on the model string. Without
+    it, `qwen/qwen3.7-plus` resolves to a different vendor entirely and the
+    failure is a billing surprise, not an error."""
+    assert build_lm().model == "openrouter/qwen/qwen3.7-plus"
 
 
-def echo_tool(recorder: list) -> Tool:
-    return Tool(
-        name="echo",
-        description="Echo a value.",
-        parameters={
-            "type": "object",
-            "properties": {"value": {"type": "string"}},
-            "required": ["value"],
-            "additionalProperties": False,
-        },
-        run=lambda value: recorder.append(value) or f"echoed {value}",
-    )
+def test_effort_is_carried_in_the_body_the_provider_accepts() -> None:
+    """Sent as a top-level `reasoning_effort`, LiteLLM rejects the request for
+    OpenRouter outright — it validates named parameters per provider rather
+    than passing unknown ones through."""
+    lm = build_lm()
+    assert lm.kwargs["extra_body"] == {"reasoning": {"effort": "medium"}}
 
 
-def last_tool_result(client: FakeClient) -> str:
-    messages = client.calls[-1]["messages"]
-    return next(m["content"] for m in reversed(messages) if m.get("role") == "tool")
+def test_a_missing_key_fails_before_a_run_starts(monkeypatch) -> None:
+    """Minutes into an analysis is the wrong place to discover there is no
+    credential."""
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    get_settings.cache_clear()
+    with pytest.raises(RuntimeError, match="OPENROUTER_API_KEY"):
+        build_lm()
 
 
-def test_tool_is_executed_and_result_fed_back() -> None:
-    recorder: list = []
-    client = FakeClient([message(tool_calls=[tool_call("echo", '{"value": "hi"}')])])
-
-    run_tool_loop(client, "sys", "user", [echo_tool(recorder)])
-
-    assert recorder == ["hi"]
-    assert last_tool_result(client) == "echoed hi"
-
-
-def test_malformed_arguments_are_returned_to_the_model() -> None:
-    client = FakeClient([message(tool_calls=[tool_call("echo", "{not json")])])
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    assert "not valid JSON" in last_tool_result(client)
-
-
-def test_unknown_tool_is_reported_not_raised() -> None:
-    client = FakeClient([message(tool_calls=[tool_call("nope", "{}")])])
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    assert "no tool named" in last_tool_result(client)
-
-
-def test_tool_exception_is_returned_to_the_model() -> None:
-    def boom(value: str) -> str:
-        raise RuntimeError("database on fire")
-
-    exploding = Tool(name="echo", description="", parameters={}, run=boom)
-    client = FakeClient([message(tool_calls=[tool_call("echo", '{"value": "x"}')])])
-
-    run_tool_loop(client, "sys", "user", [exploding])
-    assert "database on fire" in last_tool_result(client)
-
-
-def test_wrong_arguments_are_returned_to_the_model() -> None:
-    client = FakeClient([message(tool_calls=[tool_call("echo", '{"wrong": 1}')])])
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    assert "wrong arguments" in last_tool_result(client)
-
-
-def test_loop_stops_when_no_tool_calls() -> None:
-    client = FakeClient([message(content="finished")])
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    assert len(client.calls) == 1
-
-
-def test_loop_is_bounded() -> None:
-    """A model that calls tools forever must not run forever."""
-    max_turns = get_settings().atlas_max_turns
-    forever = [
-        message(tool_calls=[tool_call("echo", '{"value": "x"}')]) for _ in range(max_turns + 5)
-    ]
-    client = FakeClient(forever)
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    assert len(client.calls) == max_turns
-
-
-def test_effort_is_sent_on_every_request() -> None:
-    client = FakeClient([message(content="done")])
-    run_tool_loop(client, "sys", "user", [echo_tool([])])
-    expected = {"reasoning": {"effort": get_settings().atlas_effort}}
-    assert client.calls[0]["extra_body"] == expected
+def test_configure_binds_the_model_for_the_process() -> None:
+    """DSPy resolves the LM from a global at call time, so a run that never
+    configured one fails inside a worker thread rather than at the entry."""
+    bound = configure()
+    assert dspy.settings.lm is bound

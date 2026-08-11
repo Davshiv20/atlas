@@ -66,6 +66,10 @@ export interface EvidenceFinding {
 
 /** A single assertion, as it appears embedded in the output document. */
 export interface Claim {
+  /** How this claim is addressed for review. Comes from the engine — the id
+   *  scheme is its to own, and mirroring it here is what sent every `unit`
+   *  claim to a `#semantics` address that did not exist. */
+  id: string;
   text: string;
   /** Evidence-derived trust score from 0..1, not model certainty. */
   confidence: number;

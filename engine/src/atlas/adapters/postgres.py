@@ -8,10 +8,12 @@ Holds every line of Postgres-specific SQL that used to sit in `extract.py`,
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import Engine, inspect, text
-from sqlalchemy.engine import Inspector
+from sqlalchemy.engine import Connection, Inspector
 from sqlalchemy.exc import SQLAlchemyError
 
 from atlas.adapters.base import (
@@ -216,7 +218,11 @@ class PostgresAdapter(DatabaseAdapter):
         row_count = int(aggregates["_row_count"])
         columns = [
             column.model_copy(
-                update={"profile": self._build_profile(table, column, i, aggregates, row_count, sampled)}
+                update={
+                    "profile": self._build_profile(
+                        table, column, i, aggregates, row_count, sampled, source
+                    )
+                }
             )
             for i, column in enumerate(table.columns)
         ]
@@ -248,7 +254,7 @@ class PostgresAdapter(DatabaseAdapter):
 
         sql = f"SELECT {', '.join(selects)} FROM {source}"
         try:
-            with self.engine.connect() as connection:
+            with self._read_only() as connection:
                 return dict(connection.execute(text(sql)).mappings().one())
         except SQLAlchemyError as exc:
             logger.warning("aggregate sweep failed for %s: %s", table.qualified_name, exc)
@@ -273,6 +279,7 @@ class PostgresAdapter(DatabaseAdapter):
         aggregates: dict,
         row_count: int,
         sampled: bool,
+        source: str,
     ) -> ColumnProfile:
         non_null = int(aggregates[f"c{index}_nonnull"])
         distinct = aggregates.get(f"c{index}_distinct")
@@ -302,7 +309,7 @@ class PostgresAdapter(DatabaseAdapter):
         if reason is not None:
             return profile.model_copy(update={"values_withheld_reason": reason})
 
-        top_values = self._top_values(table, column.name, policy)
+        top_values = self._top_values(source, column.name, policy)
         if (
             policy == "strict"
             and top_values
@@ -313,19 +320,28 @@ class PostgresAdapter(DatabaseAdapter):
             )
         return profile.model_copy(update={"top_values": top_values})
 
-    def _top_values(self, table: Table, column_name: str, policy: str) -> list[ValueCount] | None:
+    def _top_values(self, source: str, column_name: str, policy: str) -> list[ValueCount] | None:
+        """Frequent values, read from the same rows the aggregate sweep read.
+
+        `source` carries the TABLESAMPLE clause when the table was large enough
+        to sample. Reading the full table here instead defeated the sampling
+        entirely — one unbounded GROUP BY per column on a table the sweep had
+        deliberately declined to scan — and, worse, produced a profile stamped
+        `sampled=True` whose values came from a complete scan. A reader cannot
+        tell those two apart, so the label has to be true of every field under
+        it, not just the ones the sweep computed.
+        """
         quoted_column = self._quote(column_name)
-        qualified = f"{self._quote(table.schema_name)}.{self._quote(table.name)}"
         sql = (
             f"SELECT {quoted_column}::text AS value, count(*) AS n "
-            f"FROM {qualified} WHERE {quoted_column} IS NOT NULL "
+            f"FROM {source} WHERE {quoted_column} IS NOT NULL "
             f"GROUP BY 1 ORDER BY n DESC LIMIT {TOP_VALUE_LIMIT}"
         )
         try:
-            with self.engine.connect() as connection:
+            with self._read_only() as connection:
                 rows = connection.execute(text(sql)).all()
         except SQLAlchemyError as exc:
-            logger.warning("top-value query failed for %s.%s: %s", table.name, column_name, exc)
+            logger.warning("top-value query failed for %s: %s", column_name, exc)
             return None
 
         # Under strict, a high-cardinality column is an identifier or free text
@@ -372,12 +388,28 @@ class PostgresAdapter(DatabaseAdapter):
             sql=sql,
         )
 
-    def _run(self, sql: str) -> list[dict]:
+    @contextmanager
+    def _read_only(self) -> Iterator[Connection]:
+        """The only way this adapter opens a connection.
+
+        Every statement Atlas issues against a database it does not own goes
+        through here, so the read-only transaction and the statement timeout
+        cannot be forgotten. They were: the guard lived in `_run`, which covers
+        typed checks, while the profiling sweep and the top-value query opened
+        raw connections and ran unbounded — and those are the most expensive
+        statements the adapter issues, a count(DISTINCT) and a GROUP BY per
+        column. The cheap, bounded queries were guarded and the ruinous ones
+        were not.
+        """
         with self.engine.connect() as connection:
             self._begin_read_only(connection)
+            yield connection
+
+    def _run(self, sql: str) -> list[dict]:
+        with self._read_only() as connection:
             return [dict(r) for r in connection.execute(text(sql)).mappings().all()]
 
-    def _begin_read_only(self, connection) -> None:
+    def _begin_read_only(self, connection: Connection) -> None:
         settings = get_settings()
         if self.capabilities.supports_read_only_transaction:
             connection.execute(text("SET TRANSACTION READ ONLY"))
@@ -389,11 +421,16 @@ class PostgresAdapter(DatabaseAdapter):
     def _grain_sql(self, check: GrainCheck) -> str:
         relation = self._qualify(check.relation)
         keys = ", ".join(self._quote(f) for f in check.key_fields)
-        first = self._quote(check.key_fields[0])
+        # Any null component makes the key null, not just the first. Checking
+        # only `key_fields[0]` reported null_keys = 0 for a composite grain
+        # whose second column was nullable, while `count(DISTINCT (a, b))`
+        # quietly skipped those same rows — so total and distinct_keys agreed
+        # and a grain that does not hold was recorded as PASSED.
+        any_null = " OR ".join(f"{self._quote(f)} IS NULL" for f in check.key_fields)
         return (
             f"SELECT count(*) AS total, "
             f"count(DISTINCT ({keys})) AS distinct_keys, "
-            f"count(*) FILTER (WHERE {first} IS NULL) AS null_keys "
+            f"count(*) FILTER (WHERE {any_null}) AS null_keys "
             f"FROM {relation}"
         )
 
@@ -404,19 +441,25 @@ class PostgresAdapter(DatabaseAdapter):
             f"s.{self._quote(a)} = t.{self._quote(b)}"
             for a, b in zip(check.source_fields, check.target_fields, strict=True)
         )
-        first_target = self._quote(check.target_fields[0])
         # A row that references nothing is not a broken reference. SQL's own
         # MATCH SIMPLE rule says a null key satisfies the constraint, and
         # counting those as orphans reported four declared, enforced foreign
         # keys in one schema as refuted purely because the column was unused.
         keyed = " AND ".join(f"s.{self._quote(a)} IS NOT NULL" for a in check.source_fields)
+        # A semi-join, not a LEFT JOIN. The join fans out whenever the target
+        # key is not unique, and `count(*)` over the joined result then counts
+        # one source row once per match: a 3-row table reported 7 source rows
+        # and a 14% orphan rate where the truth was 33%. Nothing downstream can
+        # recover the real denominator from those numbers, so the count has to
+        # be right here. EXISTS counts each source row exactly once, whatever
+        # the target's cardinality.
+        matched = f"EXISTS (SELECT 1 FROM {target} t WHERE {on})"
         return (
             f"SELECT count(*) AS source_rows, "
             f"count(*) FILTER (WHERE NOT ({keyed})) AS null_keys, "
-            f"count(*) FILTER (WHERE ({keyed}) AND t.{first_target} IS NOT NULL) "
-            f"AS matched_rows, "
-            f"count(*) FILTER (WHERE ({keyed}) AND t.{first_target} IS NULL) AS orphan_rows "
-            f"FROM {source} s LEFT JOIN {target} t ON {on}"
+            f"count(*) FILTER (WHERE ({keyed}) AND {matched}) AS matched_rows, "
+            f"count(*) FILTER (WHERE ({keyed}) AND NOT {matched}) AS orphan_rows "
+            f"FROM {source} s"
         )
 
     def _distribution_sql(self, check: DistributionCheck) -> str:
