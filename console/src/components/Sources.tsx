@@ -9,6 +9,7 @@ import {
   useExtractMutation,
   useForgetCredentialsMutation,
   useSetCredentialsMutation,
+  useSetSnowflakeCredentialsMutation,
   useSourcesQuery,
   useTestSourceMutation,
 } from "@/store/api";
@@ -29,6 +30,7 @@ export function Sources() {
   const dispatch = useAppDispatch();
   const { data: sources, isLoading } = useSourcesQuery();
   const [create, { isLoading: creating, error: createError }] = useCreateSourceMutation();
+  const [saveSnowflake, { isLoading: savingSnowflake }] = useSetSnowflakeCredentialsMutation();
   const [adding, setAdding] = useState(false);
   const [configuring, setConfiguring] = useState<SourceStatus | null>(null);
 
@@ -67,11 +69,45 @@ export function Sources() {
           onClose={() => setAdding(false)}
         >
           <SourceForm
-            busy={creating}
+            busy={creating || savingSnowflake}
             error={createError ? describeError(createError, "Could not save the connection.") : null}
             submitLabel="Add connection"
             onSubmit={async (draft) => {
-              await create(draft).unwrap().catch(() => undefined);
+              const { snowflake_credentials: credentials, ...sourceDraft } = draft;
+              let source: SourceStatus;
+              try {
+                source = await create(sourceDraft).unwrap();
+              } catch {
+                return;
+              }
+              if (credentials) {
+                try {
+                  const health = await saveSnowflake({
+                    id: source.id,
+                    credentials,
+                  }).unwrap();
+                  if (health.state !== "connected") {
+                    setAdding(false);
+                    setConfiguring({
+                      ...source,
+                      configured: true,
+                      managed: true,
+                      health,
+                    });
+                    return;
+                  }
+                } catch (error) {
+                  setAdding(false);
+                  setConfiguring({
+                    ...source,
+                    health: {
+                      state: "failed",
+                      detail: describeError(error, "Could not save the Snowflake credential."),
+                    },
+                  });
+                  return;
+                }
+              }
               setAdding(false);
             }}
             onCancel={() => setAdding(false)}
@@ -173,6 +209,11 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
       description={`${source.adapter} · ${source.namespace}`}
       onClose={onClose}
     >
+      {source.health.state === "failed" && source.health.detail && (
+        <p className="mb-3 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
+          {source.health.detail}
+        </p>
+      )}
       <CredentialField source={source} />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -299,6 +340,151 @@ function relative(iso: string): string {
  * shows that a credential exists, not what it is.
  */
 function CredentialField({ source }: { source: SourceStatus }) {
+  return source.adapter === "snowflake" ? (
+    <SnowflakeCredentialField source={source} />
+  ) : (
+    <UrlCredentialField source={source} />
+  );
+}
+
+function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
+  const [save, { isLoading: saving, data: result }] = useSetSnowflakeCredentialsMutation();
+  const [forget] = useForgetCredentialsMutation();
+  const [editing, setEditing] = useState(!source.configured);
+  const [accountIdentifier, setAccountIdentifier] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [warehouse, setWarehouse] = useState("");
+  const [role, setRole] = useState("ATLAS_READER");
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  if (!editing) {
+    return (
+      <div className="rounded-[--radius-control] border border-line bg-raised p-3">
+        <div className="flex items-center gap-2">
+          <span className="text-meta font-semibold uppercase tracking-wide text-ink-3">
+            Snowflake credentials
+          </span>
+          <span className="ident text-meta text-ink-3">
+            {source.managed ? "stored by Atlas" : `from $${source.url_env}`}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="rounded-[--radius-control] border border-line px-2 py-0.5 text-meta text-ink-2 hover:bg-surface hover:text-ink"
+            >
+              Replace
+            </button>
+            {source.managed && (
+              <button
+                type="button"
+                onClick={() => forget(source.id)}
+                className="rounded-[--radius-control] px-2 py-0.5 text-meta text-red hover:bg-red-soft"
+              >
+                Forget
+              </button>
+            )}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={async (event) => {
+        event.preventDefault();
+        setSaveError(null);
+        try {
+          const health = await save({
+            id: source.id,
+            credentials: {
+              account_identifier: accountIdentifier,
+              username,
+              password,
+              warehouse,
+              role,
+            },
+          }).unwrap();
+          if (health.state === "connected") {
+            setPassword("");
+            setEditing(false);
+          }
+        } catch (error) {
+          setSaveError(describeError(error, "Could not save the Snowflake credential."));
+        }
+      }}
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <CredentialInput label="Account identifier" value={accountIdentifier} onChange={setAccountIdentifier} placeholder="tdrsucc-mx68221" />
+        <CredentialInput label="Warehouse" value={warehouse} onChange={setWarehouse} placeholder="POC_WH" />
+        <CredentialInput label="Username" value={username} onChange={setUsername} placeholder="SHIVAM" autoComplete="username" />
+        <CredentialInput label="Password or token" value={password} onChange={setPassword} placeholder="Entered securely" type="password" autoComplete="current-password" />
+        <CredentialInput label="Role" value={role} onChange={setRole} placeholder="ATLAS_READER" />
+      </div>
+      <p className="mt-2 text-meta text-ink-3">
+        Atlas builds and encodes the connection URL on the engine. The password is never returned to this screen.
+      </p>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="submit"
+          disabled={saving || !accountIdentifier || !username || !password || !warehouse || !role}
+          className="rounded-[--radius-control] bg-cta px-3 py-1.5 text-body font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
+        >
+          {saving ? "Connecting…" : "Save and test"}
+        </button>
+        {source.configured && (
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-[--radius-control] px-2.5 py-1.5 text-body text-ink-2 hover:text-ink"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+      {(saveError || (result && result.state !== "connected")) && (
+        <p className="mt-2 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
+          {saveError ?? result?.detail}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function CredentialInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  autoComplete,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+  autoComplete?: string;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-meta font-semibold uppercase tracking-wide text-ink-3">{label}</span>
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        required
+        className="w-full rounded-[--radius-control] border border-line bg-canvas px-2.5 py-2 text-body text-ink placeholder:text-ink-4 focus:border-line-ink focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function UrlCredentialField({ source }: { source: SourceStatus }) {
   const [save, { isLoading: saving, data: result }] = useSetCredentialsMutation();
   const [forget] = useForgetCredentialsMutation();
   const [url, setUrl] = useState("");

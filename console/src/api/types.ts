@@ -256,6 +256,14 @@ export interface Job {
   error?: string;
 }
 
+export interface SnowflakeCredentials {
+  account_identifier: string;
+  username: string;
+  password: string;
+  warehouse: string;
+  role: string;
+}
+
 /** A declared source. Deliberately never carries the connection string. */
 export interface SourceStatus {
   id: string;

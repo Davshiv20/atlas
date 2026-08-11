@@ -15,7 +15,8 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Body, FastAPI, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError
+from sqlalchemy import URL
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -326,6 +327,32 @@ class CredentialRequest(BaseModel):
     url: str = Field(min_length=1, description="Full SQLAlchemy connection URL")
 
 
+class SnowflakeCredentialRequest(BaseModel):
+    account_identifier: str = Field(min_length=1, examples=["myorg-myaccount"])
+    username: str = Field(min_length=1)
+    password: SecretStr = Field(min_length=1)
+    warehouse: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+
+
+def _snowflake_url(source: Source, request: SnowflakeCredentialRequest) -> str:
+    parts = [part for part in source.namespace.split(".") if part]
+    if len(parts) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Snowflake source schema must be DATABASE.SCHEMA",
+        )
+    database, schema = parts
+    return URL.create(
+        "snowflake",
+        username=request.username,
+        password=request.password.get_secret_value(),
+        host=request.account_identifier,
+        database=f"{database}/{schema}",
+        query={"warehouse": request.warehouse, "role": request.role},
+    ).render_as_string(hide_password=False)
+
+
 @app.put("/sources/{source_id}/credentials", tags=["sources"])
 def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHealth:
     """Store the connection string and immediately re-probe.
@@ -339,6 +366,27 @@ def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHea
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
 
     set_secret(source.url_env, request.url.strip())
+    return _probe(source)
+
+
+@app.put("/sources/{source_id}/credentials/snowflake", tags=["sources"])
+def set_snowflake_credentials(
+    source_id: str, request: SnowflakeCredentialRequest
+) -> ConnectionHealth:
+    """Build and encode a Snowflake URL from normal credential fields.
+
+    People should never have to know URL-encoding rules for passwords. The
+    password is accepted as a secret field, encoded by SQLAlchemy, persisted in
+    the existing engine-side secret store, and never returned by the API.
+    """
+    try:
+        source = SourceRegistry.read().get(source_id)
+    except SourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
+    if source.adapter != "snowflake":
+        raise HTTPException(status_code=409, detail="source is not a Snowflake connection")
+
+    set_secret(source.url_env, _snowflake_url(source, request))
     return _probe(source)
 
 

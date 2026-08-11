@@ -1,12 +1,14 @@
 import { useState } from "react";
 
+import type { SnowflakeCredentials } from "@/api/types";
+
 /**
  * The connection form. Shared by setup and the sources screen so there is one
  * implementation of what a source is.
  *
- * It collects the *name* of the environment variable holding the connection
- * string, never the string. The engine has no authentication yet, so a form
- * that accepted credentials would be a credential-theft and SSRF surface.
+ * PostgreSQL can reference an operator-managed URL. Snowflake accepts normal
+ * credential fields and lets the engine construct and encode the URL; users
+ * should never have to learn connection-string escaping rules.
  */
 export interface SourceDraft {
   id: string;
@@ -14,6 +16,7 @@ export interface SourceDraft {
   url_env: string;
   namespace: string;
   label?: string;
+  snowflake_credentials?: SnowflakeCredentials;
 }
 
 export function SourceForm({
@@ -34,6 +37,11 @@ export function SourceForm({
   const [namespace, setNamespace] = useState("public");
   const [label, setLabel] = useState("");
   const [urlEnv, setUrlEnv] = useState("");
+  const [accountIdentifier, setAccountIdentifier] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [warehouse, setWarehouse] = useState("");
+  const [role, setRole] = useState("ATLAS_READER");
 
   // Suggested, not imposed: a predictable name is one less thing to mistype
   // across the form and the .env file, but sharing one variable is legitimate.
@@ -51,6 +59,17 @@ export function SourceForm({
           url_env: effectiveEnv,
           namespace,
           ...(label ? { label } : {}),
+          ...(snowflake
+            ? {
+                snowflake_credentials: {
+                  account_identifier: accountIdentifier,
+                  username,
+                  password,
+                  warehouse,
+                  role,
+                },
+              }
+            : {}),
         });
       }}
     >
@@ -95,11 +114,73 @@ export function SourceForm({
 
       {snowflake && (
         <SnowflakeGuide
-          onApply={({ id: detectedId, namespace: detectedNamespace }) => {
+          onApply={({
+            id: detectedId,
+            namespace: detectedNamespace,
+            accountIdentifier: detectedAccount,
+          }) => {
             if (!id) setId(detectedId);
             setNamespace(detectedNamespace);
+            setAccountIdentifier(detectedAccount);
           }}
         />
+      )}
+
+      {snowflake && (
+        <div className="mt-4 grid gap-4 rounded-[--radius-panel] border border-line bg-raised p-3 sm:grid-cols-2">
+          <Field label="Account identifier" hint="organization-account">
+            <input
+              value={accountIdentifier}
+              onChange={(event) => setAccountIdentifier(event.target.value)}
+              placeholder="tdrsucc-mx68221"
+              required
+              className={INPUT}
+            />
+          </Field>
+          <Field label="Warehouse">
+            <input
+              value={warehouse}
+              onChange={(event) => setWarehouse(event.target.value)}
+              placeholder="POC_WH"
+              required
+              className={INPUT}
+            />
+          </Field>
+          <Field label="Username">
+            <input
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="SHIVAM"
+              autoComplete="username"
+              required
+              className={INPUT}
+            />
+          </Field>
+          <Field label="Password or token">
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Entered securely"
+              autoComplete="current-password"
+              required
+              className={INPUT}
+            />
+          </Field>
+          <Field label="Role">
+            <input
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              placeholder="ATLAS_READER"
+              required
+              className={INPUT}
+            />
+          </Field>
+          <p className="self-end pb-1 text-meta text-ink-3">
+            Atlas encodes the password and builds the connection URL on the engine. The
+            saved secret is never returned to the browser.
+          </p>
+        </div>
       )}
 
       <details className="mt-4 rounded-[--radius-control] border border-line bg-raised p-3">
@@ -132,7 +213,12 @@ export function SourceForm({
       <div className="mt-4 flex items-center gap-2">
         <button
           type="submit"
-          disabled={busy || !id || !effectiveEnv}
+          disabled={
+            busy ||
+            !id ||
+            !effectiveEnv ||
+            (snowflake && (!accountIdentifier || !username || !password || !warehouse || !role))
+          }
           className="rounded-[--radius-control] bg-cta px-4 py-2 text-body font-medium text-cta-ink transition-colors hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4"
         >
           {busy ? "Saving…" : submitLabel}
@@ -161,7 +247,7 @@ interface SnowflakeLocation {
 function SnowflakeGuide({
   onApply,
 }: {
-  onApply: (value: { id: string; namespace: string }) => void;
+  onApply: (value: { id: string; namespace: string; accountIdentifier: string }) => void;
 }) {
   const [appUrl, setAppUrl] = useState("");
   const location = parseSnowflakeUrl(appUrl);
@@ -171,7 +257,6 @@ function SnowflakeGuide({
   const database = location?.database ?? "DATABASE";
   const schema = location?.schema ?? "SCHEMA";
   const namespace = `${database}.${schema}`;
-  const connection = `snowflake://USER:PASSWORD@${accountIdentifier}/${database}/${schema}?warehouse=YOUR_WAREHOUSE&role=ATLAS_READER`;
   const grants = `USE ROLE SECURITYADMIN;
 CREATE ROLE IF NOT EXISTS ATLAS_READER;
 GRANT USAGE ON WAREHOUSE YOUR_WAREHOUSE TO ROLE ATLAS_READER;
@@ -223,6 +308,7 @@ GRANT ROLE ATLAS_READER TO USER YOUR_USER;`;
               onApply({
                 id: schema.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
                 namespace,
+                accountIdentifier,
               })
             }
             className="mt-3 rounded-[--radius-control] border border-line-strong bg-surface px-3 py-1.5 text-meta font-medium text-ink hover:bg-raised"
@@ -247,22 +333,12 @@ GRANT ROLE ATLAS_READER TO USER YOUR_USER;`;
         </pre>
       </details>
 
-      <details className="mt-2 border-t border-line pt-2">
-        <summary className="cursor-pointer text-meta font-semibold text-ink-2">
-          2. Build the connection URL
-        </summary>
-        <p className="mt-2 text-meta text-ink-3">
-          Replace USER, PASSWORD, and YOUR_WAREHOUSE. URL-encode special characters in the
-          username or password. Browser SSO cannot be used in this URL; if your company
-          requires SSO, ask an administrator for a dedicated programmatic credential.
-        </p>
-        <code className="ident mt-2 block overflow-x-auto rounded-[--radius-control] bg-raised p-2 text-ink-2">
-          {connection}
-        </code>
-        <p className="mt-2 text-meta text-ink-3">
-          Save this source first. Its card will then ask for this connection URL and test it immediately.
-        </p>
-      </details>
+      <p className="mt-3 border-t border-line pt-2 text-meta text-ink-3">
+        <span className="font-semibold text-ink-2">2. Enter the normal connection fields below.</span>{" "}
+        Atlas builds and URL-encodes the connection string on the engine. Browser SSO
+        cannot be used directly; ask an administrator for a programmatic password or token
+        if your company requires SSO.
+      </p>
     </section>
   );
 }
