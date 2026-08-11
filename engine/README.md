@@ -54,9 +54,28 @@ close()
 quoting, extraction SQL, profiling SQL, read-only transactions, timeouts, and typed-check
 SQL.
 
-The registry and source models contain a Snowflake route, but
-`atlas/adapters/snowflake.py` and the Snowflake SQLAlchemy dependencies do not exist yet.
-Snowflake is therefore a planned adapter, not current runtime support.
+`SnowflakeAdapter` supports connection probing, table/view reflection, comments,
+declared keys, sampled profiling, typed checks, query tags, and session timeouts. Ordinary
+Snowflake keys are recorded as declared but not enforced. Hybrid-table enforcement and
+clustering-key metadata are not represented yet. Treat the adapter as early until it has
+passed against the target account.
+
+Snowflake password or programmatic-token URL:
+
+```text
+snowflake://USER:PASSWORD@ACCOUNT/DATABASE/SCHEMA?warehouse=WAREHOUSE&role=ATLAS_READER
+```
+
+For an interactive human login, `auth_method=mfa_push` passes
+`authenticator=username_password_mfa` to the Snowflake connector and waits for the user
+to approve the second factor. `auth_method=mfa_totp` additionally accepts a current TOTP
+passcode for the initial probe. The code is never persisted; both MFA modes request the
+connector's MFA token cache for later local connections. `auth_method=external_browser` is reserved for accounts
+with a configured SAML identity provider; it creates a passwordless URL with
+`authenticator=externalbrowser` and opens the system browser from the engine process.
+
+Use a role with `USAGE` on the warehouse/database/schema and `SELECT` on the intended
+objects. Set the source namespace to `DATABASE.SCHEMA`.
 
 Adapters observe values and return `CheckObservation`. Database-independent policy in
 `checks.py` computes the verdict, so two engines cannot interpret the same observation
@@ -93,7 +112,8 @@ priority signal.
 ## Sources and credentials
 
 Declared sources live in `sources.yaml` and contain only identifiers and environment
-variable names:
+variable names. In the deployment image this resolves to `/data/sources.yaml`, on the
+same persistent volume as workspace state and secrets:
 
 ```yaml
 sources:

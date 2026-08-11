@@ -206,6 +206,59 @@
         }
       }
     },
+    "/sources/{source_id}/credentials/snowflake": {
+      "put": {
+        "tags": [
+          "sources"
+        ],
+        "summary": "Set Snowflake Credentials",
+        "description": "Build and encode a Snowflake URL from normal credential fields.\n\nPeople should never have to know URL-encoding rules for passwords. The\npassword is accepted as a secret field, encoded by SQLAlchemy, persisted in\nthe existing engine-side secret store, and never returned by the API.",
+        "operationId": "set_snowflake_credentials_sources__source_id__credentials_snowflake_put",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SnowflakeCredentialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionHealth"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sources/{source_id}": {
       "delete": {
         "tags": [
@@ -1580,6 +1633,80 @@
           "reviewer"
         ],
         "title": "ReviewRequest"
+      },
+      "SnowflakeCredentialRequest": {
+        "properties": {
+          "account_identifier": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Account Identifier",
+            "examples": [
+              "myorg-myaccount"
+            ]
+          },
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Username"
+          },
+          "auth_method": {
+            "type": "string",
+            "enum": [
+              "password",
+              "mfa_push",
+              "mfa_totp",
+              "external_browser"
+            ],
+            "title": "Auth Method",
+            "default": "password"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "passcode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passcode"
+          },
+          "warehouse": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Warehouse"
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account_identifier",
+          "username",
+          "warehouse",
+          "role"
+        ],
+        "title": "SnowflakeCredentialRequest"
       },
       "Source": {
         "properties": {

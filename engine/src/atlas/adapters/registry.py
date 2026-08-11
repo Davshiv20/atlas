@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 
 from atlas.adapters.base import DatabaseAdapter, UnsupportedDatabase
 from atlas.adapters.postgres import PostgresAdapter
+from atlas.adapters.snowflake import SnowflakeAdapter
 
 
 def create_adapter(url: str, concurrency: int = 1) -> DatabaseAdapter:
@@ -25,12 +26,10 @@ def create_adapter(url: str, concurrency: int = 1) -> DatabaseAdapter:
     if dialect == "postgresql":
         return PostgresAdapter(engine)
 
-    # Snowflake is the next adapter and is not written yet. The port exists and
-    # `DatabaseCapabilities` already carries what it needs — unenforced
-    # constraints, no read-only transaction — but advertising it here made a
-    # source created from the console fail with an ImportError instead of a
-    # sentence.
+    if dialect == "snowflake":
+        return SnowflakeAdapter(engine)
+
     engine.dispose()
     raise UnsupportedDatabase(
-        f"no adapter for dialect {dialect!r}. Only postgresql is implemented."
+        f"no adapter for dialect {dialect!r}. Supported: postgresql, snowflake."
     )

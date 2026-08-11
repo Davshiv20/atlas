@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 
+from atlas import api
 from atlas.api import app
 from atlas.settings import get_settings
 from atlas.sources import Source, SourceRegistry
@@ -176,6 +180,229 @@ def test_saving_a_credential_makes_it_live_without_a_restart(client, isolated, m
     assert source["managed"] is True
 
 
+def test_snowflake_fields_are_encoded_into_a_connection_url(
+    client, isolated, monkeypatch
+) -> None:
+    path = isolated / ".secrets.env"
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        api,
+        "_probe",
+        lambda source: api.ConnectionHealth(state="connected", detail="connected"),
+    )
+    source = {
+        "id": "trellis",
+        "adapter": "snowflake",
+        "url_env": "TRELLIS_DATABASE_URL",
+        "namespace": "POC_DB.TRELLIS_SOURCE",
+    }
+    assert client.post("/sources", json=source).status_code == 201
+
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "SHIVAM",
+            "password": "contains@special:/?#%",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+
+    assert response.status_code == 200
+    parsed = make_url(os.environ["TRELLIS_DATABASE_URL"])
+    assert parsed.username == "SHIVAM"
+    assert parsed.password == "contains@special:/?#%"
+    assert parsed.host == "myorg-myaccount"
+    assert parsed.database == "POC_DB/TRELLIS_SOURCE"
+    assert dict(parsed.query) == {"role": "ATLAS_READER", "warehouse": "POC_WH"}
+    assert "contains@special" not in str(client.get("/sources").json())
+
+
+def test_snowflake_external_browser_auth_builds_a_passwordless_url(
+    client, isolated, monkeypatch
+) -> None:
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(isolated / ".secrets.env"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        api,
+        "_probe",
+        lambda source: api.ConnectionHealth(state="connected", detail="connected"),
+    )
+    source = {
+        "id": "trellis",
+        "adapter": "snowflake",
+        "url_env": "TRELLIS_DATABASE_URL",
+        "namespace": "POC_DB.TRELLIS_SOURCE",
+    }
+    assert client.post("/sources", json=source).status_code == 201
+
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "SHIVAM",
+            "auth_method": "external_browser",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+
+    assert response.status_code == 200
+    parsed = make_url(os.environ["TRELLIS_DATABASE_URL"])
+    assert parsed.username == "SHIVAM"
+    assert parsed.password is None
+    assert dict(parsed.query) == {
+        "authenticator": "externalbrowser",
+        "role": "ATLAS_READER",
+        "warehouse": "POC_WH",
+    }
+
+
+def test_snowflake_mfa_push_auth_builds_the_connector_authenticator(
+    client, isolated, monkeypatch
+) -> None:
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(isolated / ".secrets.env"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        api,
+        "_probe",
+        lambda source: api.ConnectionHealth(state="connected", detail="connected"),
+    )
+    source = {
+        "id": "trellis",
+        "adapter": "snowflake",
+        "url_env": "TRELLIS_DATABASE_URL",
+        "namespace": "POC_DB.TRELLIS_SOURCE",
+    }
+    assert client.post("/sources", json=source).status_code == 201
+
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "SHIVAM",
+            "auth_method": "mfa_push",
+            "password": "secret",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+
+    assert response.status_code == 200
+    parsed = make_url(os.environ["TRELLIS_DATABASE_URL"])
+    assert parsed.password == "secret"
+    assert dict(parsed.query) == {
+        "authenticator": "username_password_mfa",
+        "client_request_mfa_token": "true",
+        "role": "ATLAS_READER",
+        "warehouse": "POC_WH",
+    }
+
+
+def test_snowflake_totp_is_used_once_and_not_persisted(client, isolated, monkeypatch) -> None:
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(isolated / ".secrets.env"))
+    get_settings.cache_clear()
+    probed_urls: list[str | None] = []
+
+    def record_probe(source, connection_url=None):
+        probed_urls.append(connection_url)
+        return api.ConnectionHealth(state="connected", detail="connected")
+
+    monkeypatch.setattr(api, "_probe", record_probe)
+    source = {
+        "id": "trellis",
+        "adapter": "snowflake",
+        "url_env": "TRELLIS_DATABASE_URL",
+        "namespace": "POC_DB.TRELLIS_SOURCE",
+    }
+    assert client.post("/sources", json=source).status_code == 201
+
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "SHIVAM",
+            "auth_method": "mfa_totp",
+            "password": "secret",
+            "passcode": "123456",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+
+    assert response.status_code == 200
+    stored = make_url(os.environ["TRELLIS_DATABASE_URL"])
+    probed = make_url(probed_urls[-1] or "")
+    assert "passcode" not in stored.query
+    assert probed.query["passcode"] == "123456"
+    assert probed.query["client_request_mfa_token"] == "true"
+    assert "123456" not in (isolated / ".secrets.env").read_text()
+
+
+def test_snowflake_totp_requires_a_six_digit_code(client) -> None:
+    client.post(
+        "/sources",
+        json={
+            "id": "trellis",
+            "adapter": "snowflake",
+            "url_env": "TRELLIS_DATABASE_URL",
+            "namespace": "POC_DB.TRELLIS_SOURCE",
+        },
+    )
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "org-account",
+            "username": "user",
+            "auth_method": "mfa_totp",
+            "password": "secret",
+            "passcode": "12345",
+            "warehouse": "warehouse",
+            "role": "role",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_snowflake_password_auth_requires_a_password(client) -> None:
+    client.post(
+        "/sources",
+        json={
+            "id": "trellis",
+            "adapter": "snowflake",
+            "url_env": "TRELLIS_DATABASE_URL",
+            "namespace": "POC_DB.TRELLIS_SOURCE",
+        },
+    )
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "org-account",
+            "username": "user",
+            "warehouse": "warehouse",
+            "role": "role",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_snowflake_fields_are_refused_for_a_postgres_source(client) -> None:
+    client.post("/sources", json=VALID)
+    response = client.put(
+        "/sources/elara/credentials/snowflake",
+        json={
+            "account_identifier": "org-account",
+            "username": "user",
+            "password": "password",
+            "warehouse": "warehouse",
+            "role": "role",
+        },
+    )
+    assert response.status_code == 409
+
+
 def test_a_stored_credential_is_written_0600(client, isolated, monkeypatch) -> None:
     path = isolated / ".secrets.env"
     monkeypatch.setenv("ATLAS_SECRETS_FILE", str(path))
@@ -222,8 +449,6 @@ def test_an_exported_variable_wins_over_the_stored_one(isolated, monkeypatch) ->
     set_secret("SOME_DB_URL", "postgresql://stored", path)
     monkeypatch.setenv("SOME_DB_URL", "postgresql://exported")
     load_into_environment(path)
-
-    import os
 
     assert os.environ["SOME_DB_URL"] == "postgresql://exported"
 

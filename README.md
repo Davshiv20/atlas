@@ -43,9 +43,9 @@ import engine internals or maintain an independent interpretation of API models.
 - A review console with Sources, Map, table-sheet Review, and Questions surfaces.
 - A derived semantic view for agent consumption.
 
-Snowflake appears in the source model and UI as the next adapter, but the driver and
-`SnowflakeAdapter` are not implemented yet. It is not currently a supported runtime
-source.
+PostgreSQL is the established adapter. Snowflake connection, reflection, sampled
+profiling, typed checks, query tagging, and timeout support are implemented as an early
+adapter; validate it against a real Snowflake account before production use.
 
 ## Quick start
 
@@ -90,8 +90,10 @@ make image-run
 ```
 
 The production image builds the console and serves it from FastAPI on one origin.
-Runtime state and UI-managed credentials live under `/data`; mount it as a persistent
-volume.
+Runtime state lives under `/data`; mount it as a persistent volume. This includes
+`/data/sources.yaml`, `/data/.secrets.env`, workspace snapshots, evidence, and the job
+database. Without a persistent volume, connections and generated work disappear when the
+container is replaced.
 
 ## Current persistence
 

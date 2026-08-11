@@ -256,6 +256,22 @@ export interface Job {
   error?: string;
 }
 
+export type SnowflakeAuthMethod =
+  | "password"
+  | "mfa_push"
+  | "mfa_totp"
+  | "external_browser";
+
+export interface SnowflakeCredentials {
+  account_identifier: string;
+  username: string;
+  auth_method: SnowflakeAuthMethod;
+  password?: string;
+  passcode?: string;
+  warehouse: string;
+  role: string;
+}
+
 /** A declared source. Deliberately never carries the connection string. */
 export interface SourceStatus {
   id: string;

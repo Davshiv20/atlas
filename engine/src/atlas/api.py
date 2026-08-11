@@ -12,10 +12,11 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 from fastapi import Body, FastAPI, HTTPException
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
+from sqlalchemy import URL
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
@@ -263,10 +264,10 @@ def _readable(exc: Exception) -> str:
     return (first[:180] + "…") if len(first) > 180 else first
 
 
-def _probe(source: Source) -> ConnectionHealth:
+def _probe(source: Source, connection_url: str | None = None) -> ConnectionHealth:
     """Connect, confirm, and record. The single place a source's state changes."""
     try:
-        url = source.resolve_url()
+        url = connection_url or source.resolve_url()
     except RuntimeError as exc:
         health = ConnectionHealth(
             state="failed", checked_at=datetime.now(UTC), detail=str(exc)
@@ -326,6 +327,56 @@ class CredentialRequest(BaseModel):
     url: str = Field(min_length=1, description="Full SQLAlchemy connection URL")
 
 
+class SnowflakeCredentialRequest(BaseModel):
+    account_identifier: str = Field(min_length=1, examples=["myorg-myaccount"])
+    username: str = Field(min_length=1)
+    auth_method: Literal["password", "mfa_push", "mfa_totp", "external_browser"] = "password"
+    password: SecretStr | None = Field(default=None, min_length=1)
+    passcode: SecretStr | None = Field(default=None, min_length=1)
+    warehouse: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_password_for_password_auth(self) -> Self:
+        if self.auth_method != "external_browser" and self.password is None:
+            raise ValueError("password is required for password, token, or MFA authentication")
+        if self.auth_method == "mfa_totp":
+            code = self.passcode.get_secret_value() if self.passcode else ""
+            if len(code) != 6 or not code.isdigit():
+                raise ValueError("a 6-digit authenticator code is required for TOTP authentication")
+        return self
+
+
+def _snowflake_url(
+    source: Source, request: SnowflakeCredentialRequest, *, include_passcode: bool = False
+) -> str:
+    parts = [part for part in source.namespace.split(".") if part]
+    if len(parts) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Snowflake source schema must be DATABASE.SCHEMA",
+        )
+    database, schema = parts
+    query = {"warehouse": request.warehouse, "role": request.role}
+    password = request.password.get_secret_value() if request.password else None
+    if request.auth_method in {"mfa_push", "mfa_totp"}:
+        query["authenticator"] = "username_password_mfa"
+        query["client_request_mfa_token"] = "true"
+        if include_passcode and request.passcode:
+            query["passcode"] = request.passcode.get_secret_value()
+    elif request.auth_method == "external_browser":
+        query["authenticator"] = "externalbrowser"
+        password = None
+    return URL.create(
+        "snowflake",
+        username=request.username,
+        password=password,
+        host=request.account_identifier,
+        database=f"{database}/{schema}",
+        query=query,
+    ).render_as_string(hide_password=False)
+
+
 @app.put("/sources/{source_id}/credentials", tags=["sources"])
 def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHealth:
     """Store the connection string and immediately re-probe.
@@ -339,6 +390,32 @@ def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHea
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
 
     set_secret(source.url_env, request.url.strip())
+    return _probe(source)
+
+
+@app.put("/sources/{source_id}/credentials/snowflake", tags=["sources"])
+def set_snowflake_credentials(
+    source_id: str, request: SnowflakeCredentialRequest
+) -> ConnectionHealth:
+    """Build and encode a Snowflake URL from normal credential fields.
+
+    People should never have to know URL-encoding rules for passwords. The
+    password is accepted as a secret field, encoded by SQLAlchemy, persisted in
+    the existing engine-side secret store, and never returned by the API.
+    """
+    try:
+        source = SourceRegistry.read().get(source_id)
+    except SourceNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
+    if source.adapter != "snowflake":
+        raise HTTPException(status_code=409, detail="source is not a Snowflake connection")
+
+    stored_url = _snowflake_url(source, request)
+    set_secret(source.url_env, stored_url)
+    if request.auth_method == "mfa_totp":
+        # A TOTP code is single-use and expires quickly. Use it only for this
+        # connection attempt; never persist it beside the durable credential.
+        return _probe(source, _snowflake_url(source, request, include_passcode=True))
     return _probe(source)
 
 

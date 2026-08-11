@@ -9,6 +9,7 @@ import type {
   ReviewRequest,
   SchemaOutput,
   SemanticViewResponse,
+  SnowflakeCredentials,
   ConnectionHealth,
   SourceStatus,
 } from "@/api/types";
@@ -47,6 +48,18 @@ export const api = createApi({
         url: `/sources/${encodeURIComponent(id)}/credentials`,
         method: "PUT",
         body: { url },
+      }),
+      invalidatesTags: ["Sources"],
+    }),
+
+    setSnowflakeCredentials: build.mutation<
+      ConnectionHealth,
+      { id: string; credentials: SnowflakeCredentials }
+    >({
+      query: ({ id, credentials }) => ({
+        url: `/sources/${encodeURIComponent(id)}/credentials/snowflake`,
+        method: "PUT",
+        body: credentials,
       }),
       invalidatesTags: ["Sources"],
     }),
@@ -188,6 +201,7 @@ export const {
   useCreateSourceMutation,
   useDeleteSourceMutation,
   useSetCredentialsMutation,
+  useSetSnowflakeCredentialsMutation,
   useForgetCredentialsMutation,
   useTestSourceMutation,
   useWorkspacesQuery,

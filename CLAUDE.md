@@ -32,9 +32,10 @@ engine/   FastAPI + Python 3.12 + uv
 console/  React + TypeScript + Tailwind CSS + Redux Toolkit
 ```
 
-PostgreSQL is the only implemented source adapter. Snowflake is planned and appears in
-some source/UI scaffolding, but it is not operational until `SnowflakeAdapter`, its
-driver dependencies, cost controls, and integration tests exist.
+PostgreSQL is the established source adapter. Snowflake has an early adapter for
+connection, reflection, profiling, typed checks, query tagging, and timeouts. It still
+needs live-account integration validation, hybrid-table enforcement metadata, and
+production cost testing.
 
 ## Product invariants
 

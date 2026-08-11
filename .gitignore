@@ -7,6 +7,11 @@
 .env.*
 !.env.example
 
+# The source registry names real databases, accounts, and namespaces. It is
+# per-install state, not project configuration: deployments mount it at
+# ATLAS_SOURCES_FILE, and tracking it put customer connection details in git.
+sources.yaml
+
 # OS / editors
 .DS_Store
 Thumbs.db

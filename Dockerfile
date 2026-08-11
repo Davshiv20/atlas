@@ -40,6 +40,7 @@ COPY --from=console /console/dist ./static
 # UI-managed credentials all live under here, so it is the one path that needs
 # a volume in a real deployment.
 ENV ATLAS_OUTPUT_DIR=/data/out \
+    ATLAS_SOURCES_FILE=/data/sources.yaml \
     ATLAS_SECRETS_FILE=/data/.secrets.env \
     ATLAS_STATIC_DIR=/app/static \
     PATH="/app/.venv/bin:$PATH"
