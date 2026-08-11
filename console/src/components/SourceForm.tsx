@@ -93,21 +93,35 @@ export function SourceForm({
         </Field>
       </div>
 
-      <div className="mt-4 rounded-[--radius-control] border border-line bg-raised p-3">
-        <Field label="Environment variable" hint="where the connection string lives">
-          <input
-            value={effectiveEnv}
-            onChange={(e) => setUrlEnv(e.target.value.toUpperCase())}
-            placeholder="ELARA_DATABASE_URL"
-            required
-            className={`${INPUT} font-mono`}
-          />
-        </Field>
-        <p className="mt-2 text-meta text-ink-3">
-          The credential itself never passes through this form. You will put it in{" "}
-          <span className="ident">engine/.env</span> next.
-        </p>
-      </div>
+      {snowflake && (
+        <SnowflakeGuide
+          onApply={({ id: detectedId, namespace: detectedNamespace }) => {
+            if (!id) setId(detectedId);
+            setNamespace(detectedNamespace);
+          }}
+        />
+      )}
+
+      <details className="mt-4 rounded-[--radius-control] border border-line bg-raised p-3">
+        <summary className="cursor-pointer text-meta font-semibold text-ink-2">
+          Advanced: secret environment variable
+        </summary>
+        <div className="mt-3">
+          <Field label="Environment variable" hint="optional override">
+            <input
+              value={effectiveEnv}
+              onChange={(e) => setUrlEnv(e.target.value.toUpperCase())}
+              placeholder="ELARA_DATABASE_URL"
+              required
+              className={`${INPUT} font-mono`}
+            />
+          </Field>
+          <p className="mt-2 text-meta text-ink-3">
+            Atlas generates this name automatically. Change it only when an operator already
+            supplies the connection URL through a specific environment variable.
+          </p>
+        </div>
+      </details>
 
       {error && (
         <p className="mt-3 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
@@ -135,6 +149,144 @@ export function SourceForm({
       </div>
     </form>
   );
+}
+
+interface SnowflakeLocation {
+  organization: string;
+  account: string;
+  database: string;
+  schema: string;
+}
+
+function SnowflakeGuide({
+  onApply,
+}: {
+  onApply: (value: { id: string; namespace: string }) => void;
+}) {
+  const [appUrl, setAppUrl] = useState("");
+  const location = parseSnowflakeUrl(appUrl);
+  const accountIdentifier = location
+    ? `${location.organization}-${location.account}`
+    : "ORGANIZATION-ACCOUNT";
+  const database = location?.database ?? "DATABASE";
+  const schema = location?.schema ?? "SCHEMA";
+  const namespace = `${database}.${schema}`;
+  const connection = `snowflake://USER:PASSWORD@${accountIdentifier}/${database}/${schema}?warehouse=YOUR_WAREHOUSE&role=ATLAS_READER`;
+  const grants = `USE ROLE SECURITYADMIN;
+CREATE ROLE IF NOT EXISTS ATLAS_READER;
+GRANT USAGE ON WAREHOUSE YOUR_WAREHOUSE TO ROLE ATLAS_READER;
+GRANT USAGE ON DATABASE ${database} TO ROLE ATLAS_READER;
+GRANT USAGE ON SCHEMA ${namespace} TO ROLE ATLAS_READER;
+GRANT SELECT, REFERENCES ON ALL TABLES IN SCHEMA ${namespace} TO ROLE ATLAS_READER;
+GRANT SELECT ON ALL VIEWS IN SCHEMA ${namespace} TO ROLE ATLAS_READER;
+GRANT SELECT, REFERENCES ON FUTURE TABLES IN SCHEMA ${namespace} TO ROLE ATLAS_READER;
+GRANT SELECT ON FUTURE VIEWS IN SCHEMA ${namespace} TO ROLE ATLAS_READER;
+GRANT ROLE ATLAS_READER TO USER YOUR_USER;`;
+
+  return (
+    <section className="mt-4 rounded-[--radius-panel] border border-line bg-canvas p-3">
+      <h3 className="text-body font-semibold text-ink">Snowflake setup guide</h3>
+      <p className="mt-1 text-meta text-ink-3">
+        Paste the Snowflake page URL you are looking at. Atlas will derive the account,
+        database, and schema; no credential is read from this URL.
+      </p>
+
+      <label className="mt-3 block">
+        <span className="text-meta font-semibold text-ink-3">Snowsight page URL</span>
+        <input
+          value={appUrl}
+          onChange={(event) => setAppUrl(event.target.value.trim())}
+          placeholder="https://app.snowflake.com/org/account/#/data/databases/DB/schemas/SCHEMA"
+          className={`${INPUT} mt-1 font-mono text-ident`}
+        />
+      </label>
+
+      {appUrl && !location && (
+        <p className="mt-2 text-meta text-red">
+          Atlas could not read this URL. Open the schema in Snowflake and copy the full browser URL.
+        </p>
+      )}
+
+      {location && (
+        <div className="mt-3 border-t border-line pt-3">
+          <dl className="grid grid-cols-[130px_minmax(0,1fr)] gap-x-3 gap-y-1 text-meta">
+            <dt className="text-ink-3">Account identifier</dt>
+            <dd className="ident text-ink">{accountIdentifier}</dd>
+            <dt className="text-ink-3">Database</dt>
+            <dd className="ident text-ink">{database}</dd>
+            <dt className="text-ink-3">Schema</dt>
+            <dd className="ident text-ink">{schema}</dd>
+          </dl>
+          <button
+            type="button"
+            onClick={() =>
+              onApply({
+                id: schema.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+                namespace,
+              })
+            }
+            className="mt-3 rounded-[--radius-control] border border-line-strong bg-surface px-3 py-1.5 text-meta font-medium text-ink hover:bg-raised"
+          >
+            Use {namespace} in this form
+          </button>
+        </div>
+      )}
+
+      <details className="mt-3 border-t border-line pt-2">
+        <summary className="cursor-pointer text-meta font-semibold text-ink-2">
+          1. Ask a Snowflake admin for read-only access
+        </summary>
+        <p className="mt-2 text-meta text-ink-3">
+          In a worksheet, run <code className="ident">SELECT CURRENT_USER(), CURRENT_ROLE(), CURRENT_WAREHOUSE();</code>{" "}
+          to see your current values. Then ask an administrator to replace{" "}
+          <span className="ident">YOUR_WAREHOUSE</span> and <span className="ident">YOUR_USER</span>{" "}
+          and run the grants below.
+        </p>
+        <pre className="ident mt-2 overflow-x-auto rounded-[--radius-control] bg-raised p-2 text-ink-2">
+          {grants}
+        </pre>
+      </details>
+
+      <details className="mt-2 border-t border-line pt-2">
+        <summary className="cursor-pointer text-meta font-semibold text-ink-2">
+          2. Build the connection URL
+        </summary>
+        <p className="mt-2 text-meta text-ink-3">
+          Replace USER, PASSWORD, and YOUR_WAREHOUSE. URL-encode special characters in the
+          username or password. Browser SSO cannot be used in this URL; if your company
+          requires SSO, ask an administrator for a dedicated programmatic credential.
+        </p>
+        <code className="ident mt-2 block overflow-x-auto rounded-[--radius-control] bg-raised p-2 text-ink-2">
+          {connection}
+        </code>
+        <p className="mt-2 text-meta text-ink-3">
+          Save this source first. Its card will then ask for this connection URL and test it immediately.
+        </p>
+      </details>
+    </section>
+  );
+}
+
+function parseSnowflakeUrl(value: string): SnowflakeLocation | null {
+  try {
+    const url = new URL(value);
+    if (url.hostname !== "app.snowflake.com") return null;
+    const [organization, account] = url.pathname.split("/").filter(Boolean);
+    const parts = url.hash.split("/").filter(Boolean);
+    const databaseAt = parts.indexOf("databases");
+    const schemaAt = parts.indexOf("schemas");
+    const database = databaseAt >= 0 ? parts[databaseAt + 1] : undefined;
+    const schema = schemaAt >= 0 ? parts[schemaAt + 1] : undefined;
+    if (!organization || !account || !database || !schema) return null;
+    return {
+      organization: decodeURIComponent(organization),
+      account: decodeURIComponent(account),
+      database: decodeURIComponent(database),
+      schema: decodeURIComponent(schema),
+    };
+  } catch {
+    return null;
+  }
 }
 
 const INPUT =

@@ -35,7 +35,9 @@ concepts, although the UI still needs clearer cached/offline labelling.
 
 PostgreSQL is established. Snowflake is available as an early adapter for connection,
 reflection, profiling, and typed checks; validate it against the target account before
-production use.
+production use. When Snowflake is selected, the source form includes a setup helper that
+parses a Snowsight schema URL, fills `DATABASE.SCHEMA`, generates a connection template,
+and provides read-only grant SQL for an administrator.
 
 ### Map
 
