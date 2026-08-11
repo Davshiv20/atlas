@@ -86,6 +86,79 @@ def test_large_tables_use_a_bounded_sample() -> None:
     assert relation.endswith("SAMPLE SYSTEM (5.000000)")
 
 
+def test_row_estimates_are_keyed_by_the_name_the_inspector_reports() -> None:
+    """INFORMATION_SCHEMA says ORDERS; the inspector says orders.
+
+    Keyed as returned, every estimate lookup missed, so `estimated_rows` stayed
+    None and profiling read that as a small table — sampling never engaged and a
+    billion-row table got a full aggregate sweep.
+    """
+    source = adapter()
+    try:
+        assert source._normalize("ORDERS") == "orders"
+        assert source._normalize("orders") == "orders"
+    finally:
+        source.close()
+
+
+def test_large_table_is_sampled_when_the_estimate_comes_back_uppercase(monkeypatch) -> None:
+    class Inspector:
+        def get_table_names(self, schema):
+            return ["events"]
+
+        def get_view_names(self, schema):
+            return []
+
+        def get_pk_constraint(self, name, schema):
+            return {"constrained_columns": []}
+
+        def get_columns(self, name, schema):
+            return [
+                {"name": "id", "type": "NUMBER(38,0)", "nullable": False, "default": None}
+            ]
+
+        def get_table_comment(self, name, schema):
+            return {"text": None}
+
+        def get_foreign_keys(self, name, schema):
+            return []
+
+    class Result:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return self._rows
+
+    class Connection:
+        """Returns what Snowflake really returns: the stored, uppercase name."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, statement, params=None):
+            return Result([{"table_name": "EVENTS", "row_count": 2_000_000}])
+
+    source = adapter()
+    monkeypatch.setattr("atlas.adapters.snowflake.inspect", lambda engine: Inspector())
+    monkeypatch.setattr(source.engine, "connect", lambda: Connection())
+    try:
+        snapshot = source.extract_structure("ANALYTICS.PUBLIC")
+        table = snapshot.tables[0]
+        _, sampled, _ = source._table_source(table)
+    finally:
+        source.close()
+
+    assert table.estimated_rows == 2_000_000, "uppercase estimate never reached the table"
+    assert sampled is True, "a two-million-row table must not be swept in full"
+
+
 def test_structure_reflection_marks_keys_declared_not_enforced(monkeypatch) -> None:
     class Inspector:
         def get_table_names(self, schema):

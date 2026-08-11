@@ -91,7 +91,7 @@ class SnowflakeAdapter(DatabaseAdapter):
         source = self._information_schema(database, "TABLES")
         with self.engine.connect() as connection:
             self._setup_session(connection)
-            version = connection.execute(text("SELECT CURRENT_VERSION()" )).scalar_one()
+            version = connection.execute(text("SELECT CURRENT_VERSION()")).scalar_one()
             tables = connection.execute(
                 text(
                     f"SELECT COUNT(*) FROM {source} "
@@ -133,6 +133,17 @@ class SnowflakeAdapter(DatabaseAdapter):
         prefix = f"{self._quote(database)}." if database else ""
         return f"{prefix}INFORMATION_SCHEMA.{self._quote(view)}"
 
+    def _normalize(self, identifier: str) -> str:
+        """Put an identifier into the casing the inspector reports.
+
+        INFORMATION_SCHEMA returns names as Snowflake stored them — uppercase
+        unless they were created quoted — while the inspector normalizes those
+        same names to lowercase. Anything that keys off one and looks up with
+        the other matches nothing.
+        """
+        normalize = getattr(self.engine.dialect, "normalize_name", None)
+        return normalize(identifier) if callable(normalize) else identifier.lower()
+
     # --- structure -----------------------------------------------------
 
     def extract_structure(self, namespace: str) -> Snapshot:
@@ -164,8 +175,12 @@ class SnowflakeAdapter(DatabaseAdapter):
         with self.engine.connect() as connection:
             self._setup_session(connection)
             rows = connection.execute(sql, {"schema": schema}).mappings().all()
+        # Normalized on the way in, because the only consumer looks these up by
+        # the inspector's name. Keyed raw, every lookup missed, `estimated_rows`
+        # stayed None, and `_table_source` then read that as a small table and
+        # scanned the whole thing — the opposite of the sampling this exists for.
         return {
-            str(row["table_name"]): int(row["row_count"] or 0)
+            self._normalize(str(row["table_name"])): int(row["row_count"] or 0)
             for row in rows
         }
 

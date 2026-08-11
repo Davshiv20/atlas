@@ -81,7 +81,6 @@ requires-dist = [
     { name = "typer", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.52.0" },
 ]
-provides-extras = ["snowflake"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.1.1" }]

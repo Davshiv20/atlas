@@ -19,9 +19,6 @@ dependencies = [
 [project.scripts]
 atlas = "atlas.cli:app"
 
-[project.optional-dependencies]
-snowflake = []
-
 # Type checking. This section is also what anchors the project root at
 # `engine/` for an editor's language server: basedpyright walks up from the
 # file being edited, finds this, and picks up `engine/.venv` beside it. Without
