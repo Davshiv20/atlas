@@ -19,7 +19,8 @@ from atlas.evidence import (
 from atlas.facts import Fact, FactStore, Provenance, ProvenanceKind
 from atlas.questions import Question, QuestionLog
 from atlas.settings import get_settings
-from atlas.workspace import Workspace
+from atlas.snapshot import Column, Snapshot, Table
+from atlas.workspace import Workspace, WorkspaceManifest
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="executed", result="pass")
@@ -49,6 +50,20 @@ def evidence_for(relation: str, marker: int) -> EvidenceRecord:
 
 def seed() -> Workspace:
     workspace = Workspace("demo")
+    workspace.write_manifest(
+        WorkspaceManifest(id="demo", source_id="source", snapshot_generation=1)
+    )
+    Snapshot(
+        database="db",
+        schema_name="public",
+        dialect="postgresql",
+        source_id="source",
+        generation=1,
+        tables=[
+            Table(schema_name="public", name="orders", columns=[Column(name="id", data_type="int", nullable=False)]),
+            Table(schema_name="public", name="customers", columns=[Column(name="id", data_type="int", nullable=False)]),
+        ],
+    ).write(workspace.snapshot_path)
     orders = evidence_for("orders", 1)
     customers = evidence_for("customers", 2)
 

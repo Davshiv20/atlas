@@ -12,6 +12,7 @@ import type {
   SnowflakeCredentials,
   ConnectionHealth,
   SourceStatus,
+  WorkspaceSummary,
 } from "@/api/types";
 
 /**
@@ -78,10 +79,20 @@ export const api = createApi({
       invalidatesTags: ["Sources"],
     }),
 
-    workspaces: build.query<string[], void>({
+    workspaces: build.query<WorkspaceSummary[], void>({
       query: () => "/workspaces",
-      transformResponse: (r: { workspaces: string[] }) => r.workspaces,
+      transformResponse: (r: { workspaces: WorkspaceSummary[] }) => r.workspaces,
       providesTags: ["Workspaces"],
+    }),
+
+    createWorkspace: build.mutation<WorkspaceSummary, { id: string; source_id: string }>({
+      query: (body) => ({ url: "/workspaces", method: "POST", body }),
+      invalidatesTags: ["Workspaces"],
+    }),
+
+    deleteWorkspace: build.mutation<void, string>({
+      query: (id) => ({ url: `/workspaces/${encodeURIComponent(id)}`, method: "DELETE" }),
+      invalidatesTags: ["Workspaces", "Output", "Claims", "Questions", "Job"],
     }),
 
     output: build.query<SchemaOutput, string>({
@@ -157,11 +168,11 @@ export const api = createApi({
       invalidatesTags: ["Claims", "Output"],
     }),
 
-    extract: build.mutation<Job, { workspace: string; sourceId: string }>({
-      query: ({ workspace, sourceId }) => ({
+    extract: build.mutation<Job, { workspace: string; resetSemantics?: boolean }>({
+      query: ({ workspace, resetSemantics }) => ({
         url: `/workspaces/${workspace}/extract`,
         method: "POST",
-        body: { source_id: sourceId },
+        body: { reset_semantics: resetSemantics ?? false },
       }),
       invalidatesTags: ["Workspaces", "Output"],
     }),
@@ -205,6 +216,8 @@ export const {
   useForgetCredentialsMutation,
   useTestSourceMutation,
   useWorkspacesQuery,
+  useCreateWorkspaceMutation,
+  useDeleteWorkspaceMutation,
   useOutputQuery,
   useClaimsQuery,
   useQuestionsQuery,

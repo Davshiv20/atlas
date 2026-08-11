@@ -8,14 +8,14 @@ that reads is synchronous; everything that runs the pipeline returns a job id.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
 
-from fastapi import Body, FastAPI, HTTPException
-from pydantic import BaseModel, Field, SecretStr, ValidationError, model_validator
+from fastapi import Body, Depends, FastAPI, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
 from sqlalchemy import URL
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -27,7 +27,7 @@ from atlas.adapters.base import UnsupportedDatabase
 from atlas.adapters.registry import create_adapter
 from atlas.answers import record_answer
 from atlas.facts import Consequence, Fact, FactStatus, FactStore
-from atlas.jobs import Job, JobProgress, ProgressReporter, get_registry
+from atlas.jobs import ActiveWorkspaceJob, Job, JobProgress, ProgressReporter, get_registry
 from atlas.output import assess_facts, build_output
 from atlas.questions import Question, QuestionLog
 from atlas.secrets import clear_secret, has_secret, load_into_environment, set_secret
@@ -38,8 +38,15 @@ from atlas.sources import (
     Source,
     SourceNotFound,
     SourceRegistry,
+    source_registry_lock,
 )
-from atlas.workspace import InvalidWorkspace, Workspace
+from atlas.workspace import (
+    InvalidWorkspace,
+    Workspace,
+    WorkspaceBusy,
+    WorkspaceConflict,
+    WorkspaceManifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,17 +79,24 @@ app = FastAPI(
 # --- request models --------------------------------------------------------
 
 
+class CreateWorkspaceRequest(BaseModel):
+    id: str
+    source_id: str
+
+
 class ExtractRequest(BaseModel):
-    source_id: str | None = Field(default=None, description="A source declared in sources.yaml")
-    database_url: str | None = Field(
-        default=None, description="Direct URL. Falls back to ATLAS_DATABASE_URL."
-    )
-    schema_name: str | None = Field(default=None, description="Overrides the source's namespace")
+    model_config = ConfigDict(extra="forbid")
+
     profile: bool = True
+    reset_semantics: bool = Field(
+        default=False,
+        description="Required when refreshing a workspace that already has semantic state.",
+    )
 
 
 class AnalyzeRequest(BaseModel):
-    database_url: str | None = None
+    model_config = ConfigDict(extra="forbid")
+
     limit: int | None = Field(
         default=None, ge=1, le=500, description="How many tables; null means all remaining"
     )
@@ -122,19 +136,135 @@ def _workspace(name: str) -> Workspace:
 
 def _existing(name: str) -> Workspace:
     workspace = _workspace(name)
+    _ensure_manifest(workspace)
     if not workspace.exists():
         raise HTTPException(
             status_code=404, detail=f"workspace {name!r} has no snapshot; run extract first"
         )
+    _ensure_current(workspace)
     return workspace
 
 
-def _resolve_url(supplied: str | None) -> str:
+def _ensure_manifest(workspace: Workspace) -> WorkspaceManifest:
+    if workspace.has_manifest():
+        return workspace.read_manifest()
+    if not workspace.snapshot_path.exists():
+        raise HTTPException(status_code=404, detail=f"workspace {workspace.name!r} does not exist")
+    snapshot = workspace.read_snapshot()
+    if not snapshot.source_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"workspace {workspace.name!r} has no manifest and its snapshot has no source_id; "
+                "refusing ambiguous legacy migration"
+            ),
+        )
+    with source_registry_lock():
+        try:
+            SourceRegistry.read().get(snapshot.source_id)
+        except SourceNotFound as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"workspace {workspace.name!r} was captured from source {snapshot.source_id!r}, "
+                    "but that source is not declared; restore it before migration"
+                ),
+            ) from exc
+        try:
+            return workspace.migrate_legacy(snapshot.source_id)
+        except WorkspaceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _ensure_current(workspace: Workspace) -> None:
     try:
-        return supplied or get_settings().require_database_url()
+        workspace.read_current_snapshot()
+    except WorkspaceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _bound_source(workspace: Workspace) -> Source:
+    manifest = _ensure_manifest(workspace)
+    try:
+        return SourceRegistry.read().get(manifest.source_id)
+    except SourceNotFound as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"workspace {workspace.name!r} is bound to source {manifest.source_id!r}, "
+                "but that source is not declared; cached reads remain available, live operations do not"
+            ),
+        ) from exc
+
+
+def _source_url(source: Source) -> str:
+    try:
+        return source.resolve_url()
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+
+def _active_job_conflict(exc: ActiveWorkspaceJob) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={"message": "workspace already has an active mutation job", "job_id": exc.job_id},
+    )
+
+
+def _submit_mutation(
+    kind: str, workspace: Workspace, manifest: WorkspaceManifest, work
+) -> Job:
+    registry = get_registry()
+
+    def guarded_work(report: ProgressReporter) -> dict:
+        with workspace.mutation_lock():
+            return work(report)
+
+    active = registry.active_workspace_job(workspace.name)
+    if active:
+        raise _active_job_conflict(ActiveWorkspaceJob(active.id))
+    try:
+        with (
+            registry.workspace_guard(workspace.name),
+            workspace.mutation_lock(blocking=False),
+        ):
+            workspace.assert_identity(
+                source_id=manifest.source_id,
+                incarnation_id=manifest.incarnation_id,
+                generation=manifest.snapshot_generation,
+            )
+            return registry.submit(
+                kind,
+                workspace.name,
+                guarded_work,
+                snapshot_generation=manifest.snapshot_generation,
+                source_id=manifest.source_id,
+                workspace_incarnation=manifest.incarnation_id,
+                exclusive=True,
+            )
+    except ActiveWorkspaceJob as exc:
+        raise _active_job_conflict(exc) from exc
+    except (WorkspaceBusy, WorkspaceConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _workspace_write_guard(name: str) -> Iterator[None]:
+    """Keep synchronous reviews/compiles out of a mutating job's write window."""
+    registry = get_registry()
+    active = registry.active_workspace_job(name)
+    if active:
+        raise _active_job_conflict(ActiveWorkspaceJob(active.id))
+    with registry.workspace_guard(name):
+        # Close the race where a job was submitted after the first check but
+        # before this synchronous writer acquired the workspace lock.
+        active = registry.active_workspace_job(name)
+        if active:
+            raise _active_job_conflict(ActiveWorkspaceJob(active.id))
+        try:
+            with Workspace(name).mutation_lock(blocking=False):
+                yield
+        except WorkspaceBusy as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 # --- meta ------------------------------------------------------------------
@@ -154,7 +284,6 @@ def config() -> dict:
         "effort": settings.atlas_effort,
         "base_url": settings.openrouter_base_url,
         "api_key_configured": settings.openrouter_api_key is not None,
-        "database_url_configured": settings.atlas_database_url is not None,
         "max_turns": settings.atlas_max_turns,
         "max_rows": settings.atlas_max_rows,
         "statement_timeout_ms": settings.atlas_statement_timeout_ms,
@@ -217,35 +346,6 @@ def _status(source: Source) -> SourceStatus:
         managed=has_secret(source.url_env),
         health=_health.get(source.id, ConnectionHealth()),
     )
-
-
-def _url_for_workspace(workspace: Workspace, supplied: str | None) -> str:
-    """Where this workspace's database lives.
-
-    In order: an explicit URL, then the source its snapshot was captured from,
-    then ATLAS_DATABASE_URL. The middle step is what `analyze` was missing —
-    `extract` learned about sources and `analyze` did not, so every run failed
-    with "ATLAS_DATABASE_URL is not set" once sources replaced that variable.
-    """
-    if supplied:
-        return supplied
-
-    source_id = workspace.read_snapshot().source_id if workspace.exists() else None
-    if source_id:
-        try:
-            source = SourceRegistry.read().get(source_id)
-        except SourceNotFound as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"this workspace was captured from source {source_id!r}, "
-                f"which no longer exists",
-            ) from exc
-        try:
-            return source.resolve_url()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return _resolve_url(None)
 
 
 def _readable(exc: Exception) -> str:
@@ -311,12 +411,13 @@ def list_sources() -> dict[str, list[SourceStatus]]:
 
 @app.post("/sources", status_code=201, tags=["sources"])
 def create_source(source: Source) -> SourceStatus:
-    registry = SourceRegistry.read()
-    try:
-        registry.add(source)
-    except DuplicateSource as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    registry.write()
+    with source_registry_lock():
+        registry = SourceRegistry.read()
+        try:
+            registry.add(source)
+        except DuplicateSource as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        registry.write()
     # Probe on creation: the answer to "did that work" belongs in the response
     # to the action, not behind a second button the user has to know to press.
     _probe(source)
@@ -431,12 +532,22 @@ def forget_credentials(source_id: str) -> None:
 
 @app.delete("/sources/{source_id}", status_code=204, tags=["sources"])
 def delete_source(source_id: str) -> None:
-    registry = SourceRegistry.read()
-    try:
-        registry.remove(source_id)
-    except SourceNotFound as exc:
-        raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
-    registry.write()
+    with source_registry_lock():
+        referenced = Workspace.referencing_source(source_id)
+        if referenced:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "source is still referenced by workspaces",
+                    "workspaces": referenced,
+                },
+            )
+        registry = SourceRegistry.read()
+        try:
+            registry.remove(source_id)
+        except SourceNotFound as exc:
+            raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
+        registry.write()
 
 
 @app.post("/sources/{source_id}/test", tags=["sources"])
@@ -453,46 +564,141 @@ def test_source(source_id: str) -> ConnectionHealth:
     return _probe(source)
 
 
+class WorkspaceSummary(BaseModel):
+    id: str
+    source_id: str
+    adapter: str | None = None
+    namespace: str | None = None
+    source_label: str | None = None
+    snapshot_generation: int
+    snapshot_available: bool
+    snapshot_time: datetime | None = None
+    source_available: bool
+    source_configured: bool = False
+    source_health: ConnectionHealth = ConnectionHealth()
+
+
+def _workspace_summary(name: str) -> WorkspaceSummary:
+    workspace = _workspace(name)
+    manifest = _ensure_manifest(workspace)
+    snapshot = None
+    if workspace.exists():
+        _ensure_current(workspace)
+        snapshot = workspace.read_snapshot()
+    try:
+        source = SourceRegistry.read().get(manifest.source_id)
+    except SourceNotFound:
+        return WorkspaceSummary(
+            id=name,
+            source_id=manifest.source_id,
+            snapshot_generation=manifest.snapshot_generation,
+            snapshot_available=snapshot is not None,
+            snapshot_time=snapshot.extracted_at if snapshot else None,
+            source_available=False,
+            source_health=ConnectionHealth(
+                state="failed", detail=f"source {manifest.source_id!r} is not declared"
+            ),
+        )
+    health = _health.get(source.id, ConnectionHealth())
+    return WorkspaceSummary(
+        id=name,
+        source_id=manifest.source_id,
+        adapter=source.adapter,
+        namespace=source.namespace,
+        source_label=source.label,
+        snapshot_generation=manifest.snapshot_generation,
+        snapshot_available=snapshot is not None,
+        snapshot_time=snapshot.extracted_at if snapshot else None,
+        source_available=source.configured and health.state != "failed",
+        source_configured=source.configured,
+        source_health=health,
+    )
+
+
+@app.post("/workspaces", status_code=201, tags=["workspaces"])
+def create_workspace(request: CreateWorkspaceRequest) -> WorkspaceSummary:
+    with source_registry_lock():
+        try:
+            SourceRegistry.read().get(request.source_id)
+        except SourceNotFound as exc:
+            raise HTTPException(status_code=404, detail=f"no source {request.source_id!r}") from exc
+        referenced = Workspace.referencing_source(request.source_id)
+        if referenced and request.id not in referenced:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "source already has a workspace",
+                    "workspaces": referenced,
+                },
+            )
+        workspace = _workspace(request.id)
+        try:
+            workspace.create_manifest(request.source_id)
+        except WorkspaceConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _workspace_summary(workspace.name)
+
+
 @app.get("/workspaces", tags=["workspaces"])
-def list_workspaces() -> dict:
-    return {"workspaces": Workspace.list_all()}
+def list_workspaces() -> dict[str, list[WorkspaceSummary]]:
+    return {"workspaces": [_workspace_summary(name) for name in Workspace.list_all()]}
+
+
+@app.delete("/workspaces/{name}", status_code=204, tags=["workspaces"])
+def delete_workspace(
+    name: str, _guard: None = Depends(_workspace_write_guard)
+) -> None:
+    workspace = _workspace(name)
+    workspace.delete()
+    get_registry().delete_workspace(name)
 
 
 @app.post("/workspaces/{name}/extract", status_code=202, tags=["pipeline"])
 def extract(name: str, request: ExtractRequest = Body(default=ExtractRequest())) -> Job:
-    """Capture the physical layer. Deterministic; no model involved."""
+    """Capture the physical layer for the workspace's bound source."""
     workspace = _workspace(name)
-    source = None
-    if request.source_id:
-        try:
-            source = SourceRegistry.read().get(request.source_id)
-        except SourceNotFound as exc:
+    manifest = _ensure_manifest(workspace)
+    source = _bound_source(workspace)
+    url = _source_url(source)
+    if workspace.exists():
+        _ensure_current(workspace)
+        if workspace.has_semantic_state() and not request.reset_semantics:
             raise HTTPException(
-                status_code=404, detail=f"no source {request.source_id!r}"
-            ) from exc
-        try:
-            url = source.resolve_url()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-    else:
-        url = _resolve_url(request.database_url)
-
-    namespace = request.schema_name or (source.namespace if source else "public")
+                status_code=409,
+                detail=(
+                    "refreshing this workspace would discard semantic state; "
+                    "retry with reset_semantics=true to confirm"
+                ),
+            )
+    start_generation = manifest.snapshot_generation
 
     def work(report: ProgressReporter) -> dict:
         with create_adapter(url) as adapter:
             adapter.test_connection()
             report(JobProgress(message="Reading structure"))
-            snapshot = adapter.extract_structure(namespace)
-            if source:
-                snapshot = snapshot.model_copy(update={"source_id": source.id})
+            snapshot = adapter.extract_structure(source.namespace)
             if request.profile:
                 report(JobProgress(message=f"Profiling {len(snapshot.tables)} tables"))
                 snapshot = adapter.profile(snapshot)
-        snapshot.write(workspace.snapshot_path)
-        return {"tables": len(snapshot.tables), "path": str(workspace.snapshot_path)}
+        workspace.assert_identity(
+            source_id=manifest.source_id,
+            incarnation_id=manifest.incarnation_id,
+            generation=start_generation,
+        )
+        published = workspace.publish_snapshot(
+            snapshot,
+            reset_semantics=request.reset_semantics,
+            expected_source_id=manifest.source_id,
+            expected_incarnation_id=manifest.incarnation_id,
+            expected_generation=start_generation,
+        )
+        return {
+            "tables": len(snapshot.tables),
+            "path": str(workspace.snapshot_path),
+            "snapshot_generation": published.snapshot_generation,
+        }
 
-    return get_registry().submit("extract", name, work)
+    return _submit_mutation("extract", workspace, manifest, work)
 
 
 @app.post("/workspaces/{name}/analyze", status_code=202, tags=["pipeline"])
@@ -502,7 +708,10 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
     from atlas.relationships import as_claims, by_table, discover
 
     workspace = _existing(name)
-    url = _url_for_workspace(workspace, request.database_url)
+    manifest = workspace.read_manifest()
+    source = _bound_source(workspace)
+    url = _source_url(source)
+    start_generation = manifest.snapshot_generation
     if get_settings().openrouter_api_key is None:
         raise HTTPException(
             status_code=400,
@@ -510,8 +719,16 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             "and restart the engine.",
         )
 
+    def assert_current() -> None:
+        workspace.assert_identity(
+            source_id=manifest.source_id,
+            incarnation_id=manifest.incarnation_id,
+            generation=start_generation,
+        )
+
     def work(report: ProgressReporter) -> dict:
-        snapshot = workspace.read_snapshot()
+        assert_current()
+        snapshot = workspace.read_current_snapshot()
         existing = workspace.read_facts()
         # A table is analysed when something was *read* about it, not merely
         # when a claim names it. Relationship discovery writes a join claim for
@@ -533,6 +750,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             return {"claims": 0, "questions": 0, "skipped": sorted(analyzed), "tables": []}
 
         names = {t.name for t in selected}
+        assert_current()
         dropped = workspace.drop(names) if request.regenerate else {}
 
         planned = [t.name for t in selected]
@@ -547,6 +765,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         finally:
             mapper.close()
         joins, join_links = as_claims(discovery)
+        assert_current()
         workspace.absorb_relationships(joins, join_links, discovery.evidence)
 
         def describe() -> str:
@@ -571,6 +790,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             # Written now, not at the end of the run. Until this moved, a table
             # could be finished for twenty minutes with nothing on disk to show
             # for it, and a restart threw the whole run away.
+            assert_current()
             workspace.absorb(table, sink.facts, sink.questions, sink.evidence)
             reading.discard(table)
             done.append(table)
@@ -608,6 +828,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         report(
             JobProgress(message="Compiling output", tables=planned, completed=list(done))
         )
+        assert_current()
         document = build_output(
             snapshot,
             workspace.read_facts(),
@@ -630,15 +851,15 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             "output": str(workspace.output_path),
         }
 
-    return get_registry().submit("analyze", name, work)
+    return _submit_mutation("analyze", workspace, manifest, work)
 
 
 @app.post("/workspaces/{name}/compile", tags=["pipeline"])
-def compile_output(name: str) -> dict:
+def compile_output(name: str, _guard: None = Depends(_workspace_write_guard)) -> dict:
     """Rebuild output.yaml from the stored snapshot and claims. Fast; inline."""
     workspace = _existing(name)
     document = build_output(
-        workspace.read_snapshot(),
+        workspace.read_current_snapshot(),
         workspace.read_facts(),
         workspace.read_questions(),
         workspace.read_evidence(),
@@ -661,7 +882,7 @@ def get_output(name: str) -> dict:
     """
     workspace = _existing(name)
     document = build_output(
-        workspace.read_snapshot(),
+        workspace.read_current_snapshot(),
         workspace.read_facts(),
         workspace.read_questions(),
         workspace.read_evidence(),
@@ -681,7 +902,7 @@ def get_semantic_view(name: str, table: str | None = None) -> dict:
     """
     workspace = _existing(name)
     document = build_output(
-        workspace.read_snapshot(),
+        workspace.read_current_snapshot(),
         workspace.read_facts(),
         workspace.read_questions(),
         workspace.read_evidence(),
@@ -708,7 +929,12 @@ class AnswerRequest(BaseModel):
 
 
 @app.post("/workspaces/{name}/questions/{question_id}/answer", tags=["review"])
-def answer_question(name: str, question_id: str, request: AnswerRequest) -> dict:
+def answer_question(
+    name: str,
+    question_id: str,
+    request: AnswerRequest,
+    _guard: None = Depends(_workspace_write_guard),
+) -> dict:
     """Settle a question, and let the answer count as evidence.
 
     This is the only path that lifts a business claim past the OBSERVED
@@ -738,7 +964,12 @@ def answer_question(name: str, question_id: str, request: AnswerRequest) -> dict
 
 
 @app.post("/workspaces/{name}/questions/{question_id}/dismiss", tags=["review"])
-def dismiss_question(name: str, question_id: str, request: AnswerRequest) -> dict:
+def dismiss_question(
+    name: str,
+    question_id: str,
+    request: AnswerRequest,
+    _guard: None = Depends(_workspace_write_guard),
+) -> dict:
     """Set a question aside without answering it.
 
     Not the same as answering: nothing is established, no claim moves, and no
@@ -777,7 +1008,12 @@ def get_claims(name: str, status: FactStatus | None = None) -> dict:
 
 
 @app.post("/workspaces/{name}/claims/{claim_id}/review", tags=["review"])
-def review_claim(name: str, claim_id: str, request: ReviewRequest) -> Fact:
+def review_claim(
+    name: str,
+    claim_id: str,
+    request: ReviewRequest,
+    _guard: None = Depends(_workspace_write_guard),
+) -> Fact:
     """Record a human verdict.
 
     Verifying an ungrounded claim is refused: the model invariant forbids it,

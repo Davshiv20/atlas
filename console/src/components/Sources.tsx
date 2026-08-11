@@ -1,21 +1,24 @@
 import { useState } from "react";
 
-import type { SnowflakeAuthMethod, SourceStatus } from "@/api/types";
+import type { SnowflakeAuthMethod, SourceStatus, WorkspaceSummary } from "@/api/types";
 import { Modal } from "@/components/Modal";
 import { SourceForm } from "@/components/SourceForm";
 import {
   useCreateSourceMutation,
+  useCreateWorkspaceMutation,
   useDeleteSourceMutation,
+  useDeleteWorkspaceMutation,
   useExtractMutation,
   useForgetCredentialsMutation,
   useSetCredentialsMutation,
   useSetSnowflakeCredentialsMutation,
   useSourcesQuery,
   useTestSourceMutation,
+  useWorkspacesQuery,
 } from "@/store/api";
 import { describeError } from "@/api/errors";
-import { selectWorkspace } from "@/store/uiSlice";
-import { useAppDispatch } from "@/store";
+import { clearWorkspace, selectWorkspace } from "@/store/uiSlice";
+import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
  * Connections, in the shape a database client uses: a centred grid of what is
@@ -29,6 +32,7 @@ import { useAppDispatch } from "@/store";
 export function Sources() {
   const dispatch = useAppDispatch();
   const { data: sources, isLoading } = useSourcesQuery();
+  const { data: workspaces } = useWorkspacesQuery();
   const [create, { isLoading: creating, error: createError }] = useCreateSourceMutation();
   const [saveSnowflake, { isLoading: savingSnowflake }] = useSetSnowflakeCredentialsMutation();
   const [adding, setAdding] = useState(false);
@@ -53,8 +57,9 @@ export function Sources() {
               <ConnectionCard
                 key={source.id}
                 source={source}
+                workspaces={(workspaces ?? []).filter((workspace) => workspace.source_id === source.id)}
                 onConfigure={() => setConfiguring(source)}
-                onOpen={() => dispatch(selectWorkspace(source.id))}
+                onOpen={(workspaceId) => dispatch(selectWorkspace(workspaceId))}
               />
             ))}
             <NewConnectionTile onClick={() => setAdding(true)} />
@@ -124,13 +129,16 @@ export function Sources() {
 
 function ConnectionCard({
   source,
+  workspaces,
   onConfigure,
   onOpen,
 }: {
   source: SourceStatus;
+  workspaces: WorkspaceSummary[];
   onConfigure: () => void;
-  onOpen: () => void;
+  onOpen: (workspaceId: string) => void;
 }) {
+  const openable = workspaces.find((workspace) => workspace.snapshot_available);
   return (
     <article className="flex flex-col rounded-[--radius-panel] border border-line bg-surface p-4">
       <div className="flex items-start gap-3">
@@ -144,15 +152,21 @@ function ConnectionCard({
       </div>
 
       <HealthLine source={source} />
+      {workspaces.length > 0 && (
+        <p className="mt-2 text-meta text-ink-3">
+          {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"}
+          {openable ? ` · latest generation ${openable.snapshot_generation}` : " · no snapshot yet"}
+        </p>
+      )}
 
       <div className="mt-4 flex gap-2 border-t border-line pt-3">
         <button
           type="button"
-          onClick={onOpen}
-          disabled={source.health.state !== "connected"}
+          onClick={() => openable && onOpen(openable.id)}
+          disabled={!openable}
           className="rounded-[--radius-control] bg-cta px-2.5 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
         >
-          Open
+          Open workspace
         </button>
         <button
           type="button"
@@ -198,10 +212,17 @@ function NewConnectionTile({ onClick }: { onClick: () => void }) {
 /** Everything after a connection exists: check it, read it, remove it. */
 function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: () => void }) {
   const dispatch = useAppDispatch();
+  const selectedWorkspace = useAppSelector((state) => state.ui.workspace);
+  const { data: workspaces } = useWorkspacesQuery();
+  const existingWorkspace = (workspaces ?? []).find((workspace) => workspace.source_id === source.id);
+  const workspaceId = existingWorkspace?.id ?? source.id;
   const [test, { data: result, isLoading: testing }] = useTestSourceMutation();
+  const [createWorkspace] = useCreateWorkspaceMutation();
   const [extract, { isLoading: extracting }] = useExtractMutation();
-  const [remove] = useDeleteSourceMutation();
+  const [deleteWorkspace, { isLoading: deletingWorkspace }] = useDeleteWorkspaceMutation();
+  const [remove, { isLoading: deletingSource }] = useDeleteSourceMutation();
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
 
   return (
     <Modal
@@ -231,13 +252,25 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
           disabled={source.health.state !== "connected" || extracting}
           onClick={async () => {
             setExtractError(null);
+            const resetSemantics = Boolean(existingWorkspace?.snapshot_available);
+            if (
+              resetSemantics &&
+              !window.confirm(
+                `Refresh ${workspaceId}? This resets claims, evidence, questions, reviews, and derived output for this workspace only.`,
+              )
+            ) {
+              return;
+            }
             try {
-              await extract({ workspace: source.id, sourceId: source.id }).unwrap();
+              if (!existingWorkspace) {
+                await createWorkspace({ id: workspaceId, source_id: source.id }).unwrap();
+              }
+              await extract({ workspace: workspaceId, resetSemantics }).unwrap();
             } catch (error) {
               setExtractError(describeError(error, "Could not read the schema."));
               return;
             }
-            dispatch(selectWorkspace(source.id));
+            dispatch(selectWorkspace(workspaceId));
             onClose();
           }}
           className="rounded-[--radius-control] bg-cta px-3 py-1.5 text-body font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
@@ -245,21 +278,58 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
           {extracting ? "Reading schema…" : "Read schema"}
         </button>
 
+        {existingWorkspace && (
+          <button
+            type="button"
+            disabled={deletingWorkspace}
+            onClick={async () => {
+              if (
+                !window.confirm(
+                  `Delete workspace ${existingWorkspace.id}? Its snapshot, claims, evidence, questions, reviews, and jobs will be removed. The source connection remains.`,
+                )
+              ) {
+                return;
+              }
+              setLifecycleError(null);
+              try {
+                await deleteWorkspace(existingWorkspace.id).unwrap();
+              } catch (error) {
+                setLifecycleError(describeError(error, "Could not delete the workspace."));
+                return;
+              }
+              if (selectedWorkspace === existingWorkspace.id) dispatch(clearWorkspace());
+              onClose();
+            }}
+            className="ml-auto rounded-[--radius-control] px-2.5 py-1.5 text-body text-red hover:bg-red-soft disabled:text-ink-4"
+          >
+            {deletingWorkspace ? "Deleting workspace…" : "Delete workspace"}
+          </button>
+        )}
+
         <button
           type="button"
-          onClick={() => {
-            remove(source.id);
+          disabled={Boolean(existingWorkspace) || deletingSource}
+          title={existingWorkspace ? "Delete the workspace before removing its source." : undefined}
+          onClick={async () => {
+            if (!window.confirm(`Remove source ${source.id}?`)) return;
+            setLifecycleError(null);
+            try {
+              await remove(source.id).unwrap();
+            } catch (error) {
+              setLifecycleError(describeError(error, "Could not remove the source."));
+              return;
+            }
             onClose();
           }}
-          className="ml-auto rounded-[--radius-control] px-2.5 py-1.5 text-body text-red hover:bg-red-soft"
+          className={`${existingWorkspace ? "" : "ml-auto"} rounded-[--radius-control] px-2.5 py-1.5 text-body text-red hover:bg-red-soft disabled:text-ink-4`}
         >
-          Remove
+          {deletingSource ? "Removing source…" : "Remove source"}
         </button>
       </div>
 
-      {extractError && (
+      {(extractError || lifecycleError) && (
         <p className="mt-3 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
-          {extractError}
+          {extractError ?? lifecycleError}
         </p>
       )}
 

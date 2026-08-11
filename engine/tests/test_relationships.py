@@ -274,7 +274,13 @@ def test_the_map_replaces_model_authored_joins_rather_than_joining_them() -> Non
     from atlas.facts import Fact, FactStore, Provenance, ProvenanceKind
     from atlas.workspace import Workspace
 
+    snapshot = schema(
+        table("users", []),
+        table("sessions", ["user_id"], fks=[fk(["user_id"], "users")]),
+    )
     workspace = Workspace("demo", root=_tmp())
+    workspace.create_manifest("test-source")
+    workspace.publish_snapshot(snapshot)
     FactStore(
         facts=[
             Fact(
@@ -295,10 +301,6 @@ def test_the_map_replaces_model_authored_joins_rather_than_joining_them() -> Non
         ]
     ).write(workspace.facts_path)
 
-    snapshot = schema(
-        table("users", []),
-        table("sessions", ["user_id"], fks=[fk(["user_id"], "users")]),
-    )
     found = discover(Answering(), snapshot, database="db")
     facts, links = as_claims(found)
     workspace.absorb_relationships(facts, links, found.evidence)

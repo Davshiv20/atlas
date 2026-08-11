@@ -64,7 +64,7 @@ class Column(BaseModel):
 
 
 class ForeignKey(BaseModel):
-    name: str | None
+    name: str | None = None
     columns: list[str]
     referred_table: str
     referred_columns: list[str]
@@ -106,6 +106,7 @@ class Snapshot(BaseModel):
     schema_name: str
     dialect: str
     source_id: str | None = None
+    generation: int | None = Field(default=None, ge=1)
     sample_policy: str = "strict"
     extracted_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     tables: list[Table] = Field(default_factory=list)

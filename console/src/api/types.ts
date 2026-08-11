@@ -251,6 +251,9 @@ export interface Job {
   id: string;
   kind: string;
   workspace: string;
+  snapshot_generation?: number | null;
+  source_id?: string | null;
+  workspace_incarnation?: string | null;
   status: JobStatus;
   created_at: string;
   started_at?: string;
@@ -277,6 +280,20 @@ export interface SnowflakeCredentials {
 }
 
 /** A declared source. Deliberately never carries the connection string. */
+export interface WorkspaceSummary {
+  id: string;
+  source_id: string;
+  adapter?: string | null;
+  namespace?: string | null;
+  source_label?: string | null;
+  snapshot_generation: number;
+  snapshot_available: boolean;
+  snapshot_time?: string | null;
+  source_available: boolean;
+  source_configured: boolean;
+  source_health: ConnectionHealth;
+}
+
 export interface SourceStatus {
   id: string;
   adapter: string;
@@ -310,7 +327,6 @@ export interface EngineConfig {
   effort: string;
   base_url: string;
   api_key_configured: boolean;
-  database_url_configured: boolean;
   max_turns: number;
   max_rows: number;
   statement_timeout_ms: number;
