@@ -202,7 +202,7 @@ def test_snowflake_fields_are_encoded_into_a_connection_url(
     response = client.put(
         "/sources/trellis/credentials/snowflake",
         json={
-            "account_identifier": "tdrsucc-mx68221",
+            "account_identifier": "myorg-myaccount",
             "username": "SHIVAM",
             "password": "contains@special:/?#%",
             "warehouse": "POC_WH",
@@ -214,7 +214,7 @@ def test_snowflake_fields_are_encoded_into_a_connection_url(
     parsed = make_url(os.environ["TRELLIS_DATABASE_URL"])
     assert parsed.username == "SHIVAM"
     assert parsed.password == "contains@special:/?#%"
-    assert parsed.host == "tdrsucc-mx68221"
+    assert parsed.host == "myorg-myaccount"
     assert parsed.database == "POC_DB/TRELLIS_SOURCE"
     assert dict(parsed.query) == {"role": "ATLAS_READER", "warehouse": "POC_WH"}
     assert "contains@special" not in str(client.get("/sources").json())
@@ -241,7 +241,7 @@ def test_snowflake_external_browser_auth_builds_a_passwordless_url(
     response = client.put(
         "/sources/trellis/credentials/snowflake",
         json={
-            "account_identifier": "tdrsucc-mx68221",
+            "account_identifier": "myorg-myaccount",
             "username": "SHIVAM",
             "auth_method": "external_browser",
             "warehouse": "POC_WH",
@@ -281,7 +281,7 @@ def test_snowflake_mfa_push_auth_builds_the_connector_authenticator(
     response = client.put(
         "/sources/trellis/credentials/snowflake",
         json={
-            "account_identifier": "tdrsucc-mx68221",
+            "account_identifier": "myorg-myaccount",
             "username": "SHIVAM",
             "auth_method": "mfa_push",
             "password": "secret",
@@ -322,7 +322,7 @@ def test_snowflake_totp_is_used_once_and_not_persisted(client, isolated, monkeyp
     response = client.put(
         "/sources/trellis/credentials/snowflake",
         json={
-            "account_identifier": "tdrsucc-mx68221",
+            "account_identifier": "myorg-myaccount",
             "username": "SHIVAM",
             "auth_method": "mfa_totp",
             "password": "secret",

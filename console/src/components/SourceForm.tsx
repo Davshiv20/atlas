@@ -136,7 +136,7 @@ export function SourceForm({
             <input
               value={accountIdentifier}
               onChange={(event) => setAccountIdentifier(event.target.value)}
-              placeholder="tdrsucc-mx68221"
+              placeholder="myorg-myaccount"
               required
               className={INPUT}
             />

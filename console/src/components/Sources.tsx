@@ -422,7 +422,7 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
       }}
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        <CredentialInput label="Account identifier" value={accountIdentifier} onChange={setAccountIdentifier} placeholder="tdrsucc-mx68221" />
+        <CredentialInput label="Account identifier" value={accountIdentifier} onChange={setAccountIdentifier} placeholder="myorg-myaccount" />
         <CredentialInput label="Warehouse" value={warehouse} onChange={setWarehouse} placeholder="POC_WH" />
         <CredentialInput label="Username" value={username} onChange={setUsername} placeholder="SHIVAM" autoComplete="username" />
         <label className="flex flex-col gap-1">
