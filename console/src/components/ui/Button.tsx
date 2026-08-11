@@ -19,7 +19,12 @@ export type ButtonSize = "sm" | "md";
 
 const BASE =
   "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[--radius-control] " +
-  "border font-medium leading-none transition-colors duration-100 " +
+  "border font-medium leading-none transition-[background-color,transform] duration-100 " +
+  // A 3% inset on press. Nothing lifts, glows, or ripples: depth in this
+  // interface is carried by one hairline, so a button that bloomed on click
+  // would be the only object on screen behaving like a different system. It is
+  // also the only feedback a pointer gets before the row it acts on changes.
+  "active:scale-[0.97] " +
   "disabled:cursor-not-allowed disabled:opacity-45";
 
 const VARIANTS: Record<ButtonVariant, string> = {

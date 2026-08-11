@@ -1,14 +1,21 @@
 import type { Claim, ColumnOutput, ReviewState, TableOutput } from "@/api/types";
 
-/**
- * The engine's id scheme, mirrored so the console can address a claim.
+/*
+ * A placeholder id for a row that has no claim behind it.
  *
- * Plural aspects (join, quality, metric, lifecycle) carry a discriminator so a
- * subject can hold several of them; grain and semantics are singular and take
- * none. See `PLURAL_ASPECTS` in the engine's facts.py.
+ * This is NOT how a claim is addressed. The engine owns the id scheme and emits
+ * it on every claim (`Claim.id`); mirroring it here is what broke review, since
+ * a column's description is whichever of the engine's DESCRIPTION_ASPECTS
+ * scored highest — so assuming `#semantics` addressed a claim that did not
+ * exist for every column a `unit` claim won, and the review 404'd.
+ *
+ * The review sheet still renders a row for a claim that was never made
+ * ("Not established"), and React needs a stable key for it. That is the only
+ * remaining use: a row reaching for one of these has nothing to review anyway.
+ * Always prefer `claim.id` when a claim exists.
  */
-export function claimId(subject: string, aspect: string, discriminator?: string): string {
-  return discriminator ? `${subject}#${aspect}#${discriminator}` : `${subject}#${aspect}`;
+export function claimId(subject: string, aspect: string): string {
+  return `${subject}#${aspect}`;
 }
 
 export function columnClaimId(table: string, column: string): string {

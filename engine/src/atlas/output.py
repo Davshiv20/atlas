@@ -11,13 +11,30 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
 
 from atlas.classify import Consequence, classify_column, consequence
-from atlas.evidence import EvidenceRecord, EvidenceStore, LinkKind, Scope, Verdict
-from atlas.facts import Fact, FactStatus, FactStore, ProvenanceKind
+from atlas.evidence import (
+    Authority,
+    ClaimEvidence,
+    EvidenceRecord,
+    EvidenceStore,
+    EvidenceType,
+    LinkKind,
+    Scope,
+    Verdict,
+)
+from atlas.facts import (
+    Fact,
+    FactStatus,
+    FactStore,
+    Provenance,
+    ProvenanceKind,
+    join_discriminator,
+)
 from atlas.policy import TrustAssessment, assess
 from atlas.questions import Question, QuestionStatus
 from atlas.snapshot import Column, Snapshot, Table
@@ -37,6 +54,13 @@ class EvidenceFinding(BaseModel):
 
 
 class Claim(BaseModel):
+    # How a client addresses this claim back to `/claims/{id}/review`.
+    #
+    # Emitted rather than left to be reconstructed from subject and aspect: a
+    # column's description is whichever of `DESCRIPTION_ASPECTS` scored highest,
+    # so a client that assumed `#semantics` addressed a claim that did not exist
+    # for every column a `unit` claim won.
+    id: str
     text: str
     # Evidence-derived trust score. This is not a probability.
     confidence: float
@@ -53,6 +77,7 @@ class Claim(BaseModel):
     def from_fact(cls, fact: Fact, evidence: EvidenceStore | None = None) -> Claim:
         checks = [p for p in fact.provenance if p.kind is ProvenanceKind.GROUNDED_CHECK]
         return cls(
+            id=fact.id,
             text=fact.claim,
             confidence=fact.confidence,
             trust=fact.trust,
@@ -292,7 +317,9 @@ def _build_column(
     )
 
 
-def _build_joins(table: Table, facts: list[Fact], evidence: EvidenceStore | None) -> list[JoinOutput]:
+def _build_joins(
+    table: Table, facts: list[Fact], evidence: EvidenceStore | None
+) -> list[JoinOutput]:
     """One entry per relationship.
 
     Every join now carries a claim — the map is derived from the constraints
@@ -308,7 +335,7 @@ def _build_joins(table: Table, facts: list[Fact], evidence: EvidenceStore | None
 
     joins: list[JoinOutput] = []
     for fk in table.foreign_keys:
-        key = f"{fk.referred_table}.{'_'.join(fk.columns)}"
+        key = join_discriminator(fk.referred_table, fk.columns)
         claim = claims.pop(key, None)
         joins.append(
             JoinOutput(
@@ -320,20 +347,41 @@ def _build_joins(table: Table, facts: list[Fact], evidence: EvidenceStore | None
             )
         )
 
-    # What is left was established by measurement rather than declared. The
-    # discriminator carries the target and the column, so the shape survives
-    # without re-deriving it from prose.
-    for key, claim in claims.items():
-        target, _, columns = key.partition(".")
+    # What is left was established by measurement rather than declared, and its
+    # shape comes from the evidence that established it — never from splitting
+    # the discriminator apart. That value is an identity, deliberately hashed
+    # whenever a name is long or irregular, and splitting it recovered `a_b` as
+    # the column for a two-column join: a name existing in no table, emitted
+    # into the semantic view for an agent to write SQL against.
+    for claim in claims.values():
+        shape = _join_shape(claim, evidence)
+        target = shape.get("target_relation")
         joins.append(
             JoinOutput(
-                columns=[columns] if columns else [],
-                referred_table=target or None,
+                columns=[str(c) for c in shape.get("source_fields") or []],
+                referred_table=str(target) if target else None,
+                referred_columns=[str(c) for c in shape.get("target_fields") or []],
                 enforced=False,
                 description=Claim.from_fact(claim, evidence),
             )
         )
     return joins
+
+
+def _join_shape(claim: Fact, evidence: EvidenceStore | None) -> dict:
+    """How a measured relationship joins, taken from the record that settled it.
+
+    A claim whose evidence has been dropped yields nothing rather than a guess.
+    The semantic view omits a relationship carrying no columns, which is honest;
+    a fabricated column name is not, and is worse than silence because an agent
+    will use it.
+    """
+    if evidence is None:
+        return {}
+    for _, record in evidence.for_claim(claim.id):
+        if record.hypothesis.get("source_relation"):
+            return record.hypothesis
+    return {}
 
 
 def _ruled_out(evidence: EvidenceStore | None) -> dict[str, list[RuledOut]]:
@@ -389,12 +437,53 @@ def assess_facts(store: FactStore, evidence: EvidenceStore | None) -> FactStore:
             current.append(fact)
             continue
         assessment = assess(fact.aspect, pairs)
-        current.append(
-            fact.model_copy(
-                update={"confidence": assessment.confidence, "trust": assessment}
-            )
-        )
+        update: dict[str, Any] = {
+            "confidence": assessment.confidence,
+            "trust": assessment,
+        }
+        # Scoring a claim from an executed check without recording that check in
+        # its provenance leaves the two halves of the same fact disagreeing:
+        # confidence rises off the evidence while `is_grounded`, which reads
+        # provenance, still says nothing could have falsified it. The store then
+        # rejects the result outright, because an ungrounded claim is capped —
+        # and a claim that slipped past would reach the console as "no evidence"
+        # printed beside a confidence of 0.94.
+        grounding = _grounding_provenance(pairs)
+        if grounding is not None:
+            update["provenance"] = [*fact.provenance, grounding]
+        current.append(fact.model_copy(update=update))
     return FactStore(facts=current)
+
+
+# What could have contradicted a claim and did not: a check that actually ran,
+# or a constraint the database refuses to violate. Profile data is an input to
+# inference rather than a test of it, which is why `column_profile` is absent —
+# the same line `Fact.is_grounded` draws.
+_VERDICT_RESULTS: dict[Verdict, str] = {
+    Verdict.PASSED: "pass",
+    Verdict.PASSED_WITH_WARNING: "pass",
+    Verdict.FAILED: "fail",
+    Verdict.INCONCLUSIVE: "inconclusive",
+    Verdict.OBSERVED: "inconclusive",
+}
+
+
+def _grounding_provenance(
+    pairs: list[tuple[ClaimEvidence, EvidenceRecord]],
+) -> Provenance | None:
+    for _, record in pairs:
+        falsifiable = (
+            record.type is EvidenceType.DETERMINISTIC_CHECK
+            or record.authority is Authority.ENFORCED
+        )
+        if not falsifiable:
+            continue
+        return Provenance(
+            kind=ProvenanceKind.GROUNDED_CHECK,
+            detail=f"executed: {record.assertion.description}",
+            result=_VERDICT_RESULTS.get(record.verdict, "inconclusive"),  # type: ignore[arg-type]
+        )
+    return None
 
 
 def build_output(

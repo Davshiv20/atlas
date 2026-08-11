@@ -9,6 +9,7 @@ from atlas.semantic_view import build_semantic_view, render_yaml
 
 
 def claim(text: str, status: FactStatus = FactStatus.VERIFIED, **kw) -> Claim:
+    kw.setdefault("id", f"subject#{abs(hash(text)) % 10_000}")
     return Claim(text=text, confidence=0.9, status=status, grounded=True, **kw)
 
 

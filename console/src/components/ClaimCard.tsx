@@ -87,7 +87,16 @@ export function ClaimCard({
       <header className="flex flex-wrap items-center gap-2">
         <span className="ident text-table text-ink">{item.table}</span>
         <span className="text-body text-ink-3">{item.label}</span>
-        {!item.claim.grounded && <Badge tone="generated">AI generated</Badge>}
+        {/* The missing thing is evidence, not human authorship — every claim
+            here was written by the model, including the validated ones. */}
+        {!item.claim.grounded && (
+          <Badge
+            tone="unsettled"
+            title="No check was run that could have contradicted this claim."
+          >
+            No evidence
+          </Badge>
+        )}
         <span
           className={`ml-auto rounded-full px-2 py-[2px] text-meta font-medium ${
             item.claim.confidence < 0.5

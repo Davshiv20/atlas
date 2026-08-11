@@ -40,6 +40,7 @@ from atlas.facts import (
     FactStore,
     Provenance,
     ProvenanceKind,
+    discriminator_from,
 )
 from atlas.policy import assess
 from atlas.questions import Question
@@ -140,7 +141,10 @@ def _discriminator_for(question: Question) -> str | None:
     """
     if question.aspect not in PLURAL_ASPECTS:
         return None
-    return question.id.removeprefix("question:")
+    # Through the shared encoder even though a question id is already a
+    # clean hex slug: one encoding with three call sites cannot drift, and
+    # three call sites that each look safe individually can.
+    return discriminator_from(question.id.removeprefix("question:"))
 
 
 def _as_evidence(question: Question) -> EvidenceRecord:

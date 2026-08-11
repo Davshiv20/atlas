@@ -239,7 +239,41 @@ def test_a_declared_key_and_its_claim_are_one_join_not_two() -> None:
         ]
     )
 
-    joins = {t.name: t.joins for t in build_output(snapshot, store, []).tables}["sessions"]
+    # The measured join carries its shape in the evidence that established it,
+    # not in its discriminator — that value is an identity and is hashed
+    # whenever a name is long or irregular, so it cannot be split back apart.
+    record, _ = run_check(
+        _StubAdapter(
+            CheckObservation(
+                check_type="join",
+                observations={"source_rows": 10, "matched_rows": 10, "orphan_rows": 0},
+                complete_scan=True,
+                rows_examined=10,
+                sql="SELECT …",
+            )
+        ),
+        JoinCheck(
+            source_relation="sessions",
+            source_fields=["owner_id"],
+            target_relation="teams",
+            target_fields=["id"],
+        ),
+        database="db",
+    )
+    evidence = EvidenceStore()
+    evidence.add(record)
+    evidence.link(
+        ClaimEvidence(
+            claim_id="sessions#join#teams.owner_id",
+            evidence_id=record.id,
+            relationship=LinkKind.SUPPORTS,
+            rationale="every keyed row matched",
+        )
+    )
+
+    joins = {
+        t.name: t.joins for t in build_output(snapshot, store, [], evidence).tables
+    }["sessions"]
 
     assert len(joins) == 2
     declared = next(j for j in joins if j.enforced)

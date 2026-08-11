@@ -14,7 +14,7 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from openai import OpenAI
+import dspy
 from pydantic import BaseModel, Field, ValidationError
 
 from atlas.adapters.base import (
@@ -28,7 +28,7 @@ from atlas.checks import run_check
 from atlas.classify import consequence, worth_describing
 from atlas.evidence import ClaimEvidence, EvidenceRecord, EvidenceStore, LinkKind, Verdict
 from atlas.facts import Consequence, Fact, FactStatus, FactStore, Provenance, ProvenanceKind
-from atlas.llm import Tool, build_client, run_tool_loop
+from atlas.llm import configure
 from atlas.policy import Trust, assess
 from atlas.questions import Question, QuestionLog
 from atlas.settings import get_settings
@@ -102,9 +102,17 @@ class AnalysisSink(BaseModel):
     # that a check actually produced, which is what makes an unbacked claim
     # unrepresentable rather than merely discouraged.
     evidence: EvidenceStore = Field(default_factory=EvidenceStore)
-    # True when the model was cut off by the turn ceiling rather than finishing.
+    # True when the model was cut off by the step ceiling rather than finishing.
     # Its claims are then a partial reading of the table, not a complete one.
     truncated: bool = False
+    # The tools called, in order. Kept because a run that records nothing used
+    # to leave no trace of what it had spent forty steps doing.
+    trajectory: list[str] = Field(default_factory=list)
+    # Why claims were refused. The trajectory says `record_claim` was called
+    # four times; only this says all four were rejected and on what grounds,
+    # which is the difference between "the model found nothing" and "the model
+    # tried and the gate turned it away".
+    rejections: list[str] = Field(default_factory=list)
 
 
 def render_table(
@@ -203,6 +211,22 @@ def _irrelevant(subject: str, record: EvidenceRecord) -> str | None:
     return f"it observed {', '.join(sorted(fields))}, not {subject}"
 
 
+def _full_evidence_id(cited: str) -> str:
+    """An evidence id, however the model wrote it."""
+    cited = cited.strip()
+    return cited if cited.startswith("evidence:") else f"evidence:{cited}"
+
+
+def _bare_subject(snapshot: Snapshot, subject: str) -> str:
+    """`public.orders.status` and `orders.status` name the same column.
+
+    The rendered table carries its qualified name, so the model reasonably
+    echoes it back; claim ids are keyed on the bare one. Stripping the schema
+    here keeps one id per subject instead of two that never merge.
+    """
+    return subject.removeprefix(f"{snapshot.schema_name}.")
+
+
 def _bearing(record: EvidenceRecord) -> LinkKind:
     """How one evidence record bears on the claim that cited it.
 
@@ -226,7 +250,7 @@ def _bearing(record: EvidenceRecord) -> LinkKind:
 
 def build_tools(
     adapter: DatabaseAdapter, snapshot: Snapshot, sink: AnalysisSink
-) -> list[Tool]:
+) -> list[dspy.Tool]:
     """The agent's whole surface.
 
     There is no generic SQL tool. The agent proposes a hypothesis as typed
@@ -284,6 +308,15 @@ def build_tools(
         evidence_ids: list[str],
         discriminator: str = "",
     ) -> str:
+        # The model's output is untrusted input, so both identifiers are
+        # normalised rather than required to match exactly. It cites evidence
+        # by the bare hash about as often as by the full `evidence:` id, and
+        # names a table by its qualified name about as often as its bare one;
+        # rejecting either spends a step teaching it a convention instead of
+        # reading the table, and four claims were lost to it in one run.
+        subject = _bare_subject(snapshot, subject)
+        evidence_ids = [_full_evidence_id(e) for e in evidence_ids]
+
         # Resolved once. Looking each id up again on every use meant four
         # separate places had to trust that the guard above had run, and none
         # of them could be checked — a miss would have reached `evaluate` as a
@@ -291,9 +324,11 @@ def build_tools(
         cited = {e: sink.evidence.by_id(e) for e in evidence_ids}
         unknown = [e for e, record in cited.items() if record is None]
         if unknown:
-            return (
-                f"REJECTED: no such evidence {unknown}. Cite ids returned by a check you ran "
-                f"in this session."
+            return _refuse(
+                subject,
+                aspect,
+                f"no such evidence {unknown}. Cite ids returned by a check you ran "
+                f"in this session.",
             )
         records = {e: record for e, record in cited.items() if record is not None}
 
@@ -303,10 +338,12 @@ def build_tools(
             if (reason := _irrelevant(subject, record)) is not None
         ]
         if mismatched:
-            return (
-                f"REJECTED: evidence that is not about {subject}: {'; '.join(mismatched)}. "
+            return _refuse(
+                subject,
+                aspect,
+                f"evidence that is not about {subject}: {'; '.join(mismatched)}. "
                 f"Run a check on {subject} itself, or claim what the evidence you have "
-                f"actually observed."
+                f"actually observed.",
             )
 
         weight = _consequence_of(snapshot, subject, aspect)
@@ -330,10 +367,12 @@ def build_tools(
         )
 
         if trust is Trust.UNSUPPORTED and weight is not Consequence.ROUTINE:
-            return (
-                f"REJECTED: a {weight.value}-consequence {aspect} claim cannot be recorded "
-                f"without supporting evidence. Run a check that could have contradicted it, "
-                f"or ask a question instead."
+            return _refuse(
+                subject,
+                aspect,
+                f"a {weight.value}-consequence {aspect} claim cannot be recorded without "
+                f"supporting evidence. Run a check that could have contradicted it, or "
+                f"ask a question instead.",
             )
 
         try:
@@ -365,12 +404,16 @@ def build_tools(
                 else FactStatus.UNVERIFIED,
             )
         except ValidationError as exc:
-            return f"REJECTED: {exc.errors()[0]['msg']}"
+            return _refuse(subject, aspect, str(exc.errors()[0]["msg"]))
 
         sink.facts.append(fact)
         for link in links:
             sink.evidence.link(link)
         return f"Recorded {fact.id} — {trust.value}, confidence {score:.2f} ({'; '.join(reasons)})."
+
+    def _refuse(subject: str, aspect: str, reason: str) -> str:
+        sink.rejections.append(f"{subject}#{aspect}: {reason}")
+        return f"REJECTED: {reason}"
 
     def ask_human(subject: str, question: str, evidence: str, aspect: str = "semantics") -> str:
         # `aspect` is what the answer would establish. Without it an answer has
@@ -381,18 +424,17 @@ def build_tools(
         )
         return "Queued for review."
 
-    def _tool(name, description, properties, required, run) -> Tool:
-        return Tool(
-            name=name,
-            description=description,
-            parameters={
-                "type": "object",
-                "properties": properties,
-                "required": required,
-                "additionalProperties": False,
-            },
-            run=run,
-        )
+    def _tool(name, description, properties, required, run) -> dspy.Tool:
+        """Wrap one callable for the agent.
+
+        `dspy.Tool` derives the argument schema from the function's type hints,
+        but the declared schema is passed explicitly so the enums survive: the
+        set of legal aspects is part of what the agent is allowed to assert,
+        not a hint. `required` is unused — every parameter these tools take is
+        required, and a partially applied check is not a check.
+        """
+        del required
+        return dspy.Tool(run, name=name, desc=description, args=properties)
 
     string = {"type": "string"}
     string_list = {"type": "array", "items": {"type": "string"}}
@@ -487,29 +529,58 @@ def build_tools(
     ]
 
 
+class ReadTable(dspy.Signature):
+    """Establish what a table means, grounding every claim in an executed check.
+
+    The prose this returns is discarded. A claim only exists once
+    `record_claim` has accepted it with evidence, so the summary is a
+    courtesy to the log, never a source of truth — an assertion that appears
+    only here was never grounded and is not part of the catalogue.
+    """
+
+    table: str = dspy.InputField(desc="Physical detail: columns, types, profiles, samples.")
+    established: str = dspy.InputField(
+        desc="Relationships already settled against the database. Do not re-check these."
+    )
+    summary: str = dspy.OutputField(desc="What you established and what remains unclear.")
+
+
 def analyze_table(
-    client: OpenAI,
     adapter: DatabaseAdapter,
     snapshot: Snapshot,
     table: Table,
     relationships: list[str] | None = None,
 ) -> AnalysisSink:
     sink = AnalysisSink()
-    tools = build_tools(adapter, snapshot, sink)
-
-    sink.truncated = run_tool_loop(
-        client,
-        system=SYSTEM_PROMPT,
-        user=render_table(snapshot, table, relationships),
-        tools=tools,
-        on_text=lambda text: logger.info("[%s] %s", table.name, text.strip()[:300]),
+    agent = dspy.ReAct(
+        ReadTable,
+        tools=build_tools(adapter, snapshot, sink),
+        # The same ceiling as before, and the same meaning: a reading cut off
+        # here is partial, not wrong.
+        max_iters=get_settings().atlas_max_turns,
     )
+
+    prediction = agent(
+        table=render_table(snapshot, table, relationships),
+        established="\n".join(relationships or []) or "none established",
+    )
+
+    # ReAct stops either because the model called `finish` or because it ran
+    # out of iterations. Only the second is truncation, and the trajectory is
+    # what distinguishes them — the old loop could not tell them apart.
+    trajectory = getattr(prediction, "trajectory", {}) or {}
+    calls = [name for key, name in trajectory.items() if key.startswith("tool_name_")]
+    sink.truncated = "finish" not in calls
+    sink.trajectory = calls
+
     if sink.truncated:
         logger.warning(
-            "%s hit the turn ceiling after %d claim(s); its reading is partial",
+            "%s hit the %d-step ceiling after %d claim(s); its reading is partial",
             table.name,
+            get_settings().atlas_max_turns,
             len(sink.facts),
         )
+    logger.info("[%s] %s", table.name, str(prediction.summary)[:300])
 
     for question in sink.questions:
         question.table = table.name
@@ -549,7 +620,6 @@ def analyze_schema(
     adapter: DatabaseAdapter,
     snapshot: Snapshot,
     limit: int | None = None,
-    client: OpenAI | None = None,
     tables: list[str] | None = None,
     already_analyzed: set[str] | None = None,
     on_table_start: Callable[[str], None] | None = None,
@@ -575,7 +645,7 @@ def analyze_schema(
     partial one. Both are invoked under a lock: the concurrency belongs to this
     function, so callers write to the workspace as if they were sequential.
     """
-    client = client or build_client()
+    configure()
     ranked = select_tables(snapshot, limit, tables, already_analyzed)
     if not ranked:
         return FactStore(), QuestionLog(), EvidenceStore()
@@ -590,7 +660,7 @@ def analyze_schema(
             if on_table_start:
                 on_table_start(table.name)
         sink = analyze_table(
-            client, adapter, snapshot, table, (relationships or {}).get(table.name)
+            adapter, snapshot, table, (relationships or {}).get(table.name)
         )
         # Persisting is serialised, not the reading. The workspace rewrites
         # whole files and merges claim by claim; two workers landing at once
