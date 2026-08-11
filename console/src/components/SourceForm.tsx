@@ -69,6 +69,7 @@ export function SourceForm({
         <Field label="Engine">
           <select value={adapter} onChange={(e) => setAdapter(e.target.value)} className={INPUT}>
             <option value="postgresql">PostgreSQL</option>
+            <option value="snowflake">Snowflake</option>
           </select>
         </Field>
 
