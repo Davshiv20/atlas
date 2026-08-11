@@ -90,8 +90,10 @@ make image-run
 ```
 
 The production image builds the console and serves it from FastAPI on one origin.
-Runtime state and UI-managed credentials live under `/data`; mount it as a persistent
-volume.
+Runtime state lives under `/data`; mount it as a persistent volume. This includes
+`/data/sources.yaml`, `/data/.secrets.env`, workspace snapshots, evidence, and the job
+database. Without a persistent volume, connections and generated work disappear when the
+container is replaced.
 
 ## Current persistence
 

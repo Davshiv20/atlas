@@ -104,7 +104,8 @@ priority signal.
 ## Sources and credentials
 
 Declared sources live in `sources.yaml` and contain only identifiers and environment
-variable names:
+variable names. In the deployment image this resolves to `/data/sources.yaml`, on the
+same persistent volume as workspace state and secrets:
 
 ```yaml
 sources:
