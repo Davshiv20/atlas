@@ -27,9 +27,9 @@ from atlas.settings import get_settings
 SOURCE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 ENV_VAR = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
-# What `create_adapter` can actually build. Snowflake is designed for and not
-# written: listing it here let a source be created that could never connect.
-SUPPORTED_ADAPTERS = ("postgresql",)
+# What `create_adapter` can actually build. Keep this list aligned with the
+# registry so the console cannot save a source that the engine cannot open.
+SUPPORTED_ADAPTERS = ("postgresql", "snowflake")
 
 
 class SourceNotFound(KeyError):

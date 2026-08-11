@@ -307,7 +307,7 @@ function CredentialField({ source }: { source: SourceStatus }) {
 
   const placeholder =
     source.adapter === "snowflake"
-      ? "snowflake://user:pass@account/DB?warehouse=WH&role=R"
+      ? "snowflake://user:pass@account/DB/SCHEMA?warehouse=WH&role=ATLAS_READER"
       : "postgresql+psycopg://user:pass@host:5432/db";
 
   if (!editing) {

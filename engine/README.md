@@ -54,9 +54,20 @@ close()
 quoting, extraction SQL, profiling SQL, read-only transactions, timeouts, and typed-check
 SQL.
 
-The registry and source models contain a Snowflake route, but
-`atlas/adapters/snowflake.py` and the Snowflake SQLAlchemy dependencies do not exist yet.
-Snowflake is therefore a planned adapter, not current runtime support.
+`SnowflakeAdapter` supports connection probing, table/view reflection, comments,
+declared keys, sampled profiling, typed checks, query tags, and session timeouts. Ordinary
+Snowflake keys are recorded as declared but not enforced. Hybrid-table enforcement and
+clustering-key metadata are not represented yet. Treat the adapter as early until it has
+passed against the target account.
+
+Snowflake URL:
+
+```text
+snowflake://USER:PASSWORD@ACCOUNT/DATABASE/SCHEMA?warehouse=WAREHOUSE&role=ATLAS_READER
+```
+
+Use a role with `USAGE` on the warehouse/database/schema and `SELECT` on the intended
+objects. Set the source namespace to `DATABASE.SCHEMA`.
 
 Adapters observe values and return `CheckObservation`. Database-independent policy in
 `checks.py` computes the verdict, so two engines cannot interpret the same observation

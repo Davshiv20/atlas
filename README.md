@@ -43,9 +43,9 @@ import engine internals or maintain an independent interpretation of API models.
 - A review console with Sources, Map, table-sheet Review, and Questions surfaces.
 - A derived semantic view for agent consumption.
 
-Snowflake appears in the source model and UI as the next adapter, but the driver and
-`SnowflakeAdapter` are not implemented yet. It is not currently a supported runtime
-source.
+PostgreSQL is the established adapter. Snowflake connection, reflection, sampled
+profiling, typed checks, query tagging, and timeout support are implemented as an early
+adapter; validate it against a real Snowflake account before production use.
 
 ## Quick start
 

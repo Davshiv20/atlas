@@ -10,6 +10,7 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0",
+    "snowflake-sqlalchemy>=1.11.0",
     "sqlalchemy>=2.0",
     "typer>=0.15",
     "uvicorn>=0.52.0",
@@ -17,6 +18,9 @@ dependencies = [
 
 [project.scripts]
 atlas = "atlas.cli:app"
+
+[project.optional-dependencies]
+snowflake = []
 
 # Type checking. This section is also what anchors the project root at
 # `engine/` for an editor's language server: basedpyright walks up from the
