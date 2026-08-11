@@ -144,15 +144,29 @@ def test_grounded_claim_can_be_verified(client) -> None:
     assert response.json()["status"] == "verified"
 
 
-def test_verifying_an_ungrounded_claim_is_refused(client) -> None:
-    """The invariant that stops a guess being promoted by a distracted reviewer."""
+def test_endorsing_an_ungrounded_claim_grounds_it_rather_than_refusing(client) -> None:
+    """The 409 is gone, and what it protected is kept a different way.
+
+    Refusing was the old way of stopping a guess being promoted by a distracted
+    reviewer. A human decision is now evidence, so endorsing an ungrounded claim
+    grounds it — the record says a person asserted this, under their name,
+    against the observations they were shown. What must not happen is the result
+    becoming indistinguishable from a claim a check established.
+    """
     seed()
     response = client.post(
         "/workspaces/demo/claims/orders.status%23semantics/review",
         json={"decision": "verified", "reviewer": "shivam"},
     )
-    assert response.status_code == 409
-    assert "no executed check" in response.json()["detail"]
+    assert response.status_code == 200
+
+    fact = response.json()
+    human = [p for p in fact["provenance"] if p["kind"] == "human"]
+    assert human, "the decision must be recorded on the claim, attributed"
+    assert "shivam" in human[-1]["detail"]
+
+    checks = [p for p in fact["provenance"] if p["kind"] == "grounded_check"]
+    assert not checks, "asserting must not fabricate an executed check"
 
 
 def test_ungrounded_claim_can_still_be_rejected(client) -> None:

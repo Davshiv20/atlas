@@ -17,6 +17,12 @@ import yaml
 from pydantic import BaseModel, Field
 
 from atlas.classify import Consequence, classify_column, consequence
+from atlas.endorsement import (
+    Endorsement,
+    endorsement,
+    from_legacy_status,
+    projected_status,
+)
 from atlas.evidence import (
     Authority,
     ClaimEvidence,
@@ -433,24 +439,38 @@ def assess_facts(store: FactStore, evidence: EvidenceStore | None) -> FactStore:
     current: list[Fact] = []
     for fact in store.facts:
         pairs = evidence.for_claim(fact.id)
-        if not pairs:
-            current.append(fact)
-            continue
-        assessment = assess(fact.aspect, pairs)
+
+        # Endorsement is derived for every claim, evidence or not. "Nobody has
+        # judged this" is an answer, and a decision taken before decisions were
+        # recorded as evidence still has to be projected rather than dropped —
+        # skipping the unlinked claims left a verified one carrying no
+        # endorsement at all, which is the divergence in miniature.
+        standing = endorsement(
+            pairs, auto_accepted=fact.status is FactStatus.AUTO_ACCEPTED
+        )
+        if standing.state is Endorsement.NONE and fact.verified_by:
+            standing = from_legacy_status(fact.status.value, fact.verified_by)
+
         update: dict[str, Any] = {
-            "confidence": assessment.confidence,
-            "trust": assessment,
+            "endorsement": standing,
+            "status": FactStatus(projected_status(standing.state)),
         }
-        # Scoring a claim from an executed check without recording that check in
-        # its provenance leaves the two halves of the same fact disagreeing:
-        # confidence rises off the evidence while `is_grounded`, which reads
-        # provenance, still says nothing could have falsified it. The store then
-        # rejects the result outright, because an ungrounded claim is capped —
-        # and a claim that slipped past would reach the console as "no evidence"
-        # printed beside a confidence of 0.94.
-        grounding = _grounding_provenance(pairs)
-        if grounding is not None:
-            update["provenance"] = [*fact.provenance, grounding]
+
+        # Trust needs something to read. Without linked evidence a claim keeps
+        # the scalar it was written with until it is regenerated or grounded.
+        if pairs:
+            assessment = assess(fact.aspect, pairs)
+            update["confidence"] = assessment.confidence
+            update["trust"] = assessment
+            # Scoring a claim from an executed check without recording that
+            # check in its provenance leaves the two halves of one fact
+            # disagreeing: confidence rises off the evidence while
+            # `is_grounded`, which reads provenance, still says nothing could
+            # have falsified it. The store then rejects the result outright.
+            grounding = _grounding_provenance(pairs)
+            if grounding is not None:
+                update["provenance"] = [*fact.provenance, grounding]
+
         current.append(fact.model_copy(update=update))
     return FactStore(facts=current)
 

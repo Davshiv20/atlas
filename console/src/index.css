@@ -1,3 +1,8 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench
+ * design-system: console/DESIGN.md · designed-as-app
+ * theme: preserved (cool neutrals + single indigo accent — not re-picked)
+ * pre-emit critique: P5 H5 E4 S5 R5 V4
+ */
 @import "tailwindcss";
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap");
 
