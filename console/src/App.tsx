@@ -16,12 +16,14 @@ import {
   useQuestionsQuery,
   useWorkspacesQuery,
 } from "@/store/api";
-import { adoptJob, finishJob, selectWorkspace, setView } from "@/store/uiSlice";
+import { adoptJob, clearWorkspace, finishJob, selectWorkspace, setView } from "@/store/uiSlice";
 import { useAppDispatch, useAppSelector } from "@/store";
 
 export default function App() {
   const dispatch = useAppDispatch();
-  const { workspace, runningJobId, finishedJob, view } = useAppSelector((s) => s.ui);
+  const { workspace, runningJobId, runningWorkspace, finishedJob, view } = useAppSelector(
+    (s) => s.ui,
+  );
 
   const { data: config } = useConfigQuery();
   const { data: workspaces, isLoading: loadingWorkspaces, error: workspacesError } =
@@ -42,20 +44,26 @@ export default function App() {
   // mid-run — or a second tab, or a run started from the CLI — showed an idle
   // workspace while the engine was minutes into analysing it.
   const { data: workspaceJobs, error: jobsError } = useJobsQuery(workspace ?? "", {
-    skip: !workspace || Boolean(runningJobId),
+    skip: !workspace || runningWorkspace === workspace,
     pollingInterval: 10_000,
   });
 
   useEffect(() => {
-    if (runningJobId || !workspaceJobs) return;
+    if (!workspace || runningWorkspace === workspace || !workspaceJobs) return;
     const live = workspaceJobs.find(
       (candidate) => candidate.status === "running" || candidate.status === "pending",
     );
-    if (live) dispatch(adoptJob(live.id));
-  }, [workspaceJobs, runningJobId, dispatch]);
+    if (live) dispatch(adoptJob({ id: live.id, workspace }));
+  }, [workspace, workspaceJobs, runningWorkspace, dispatch]);
 
   useEffect(() => {
-    if (!workspace && workspaces?.length) dispatch(selectWorkspace(workspaces[0]!));
+    if (!workspaces) return;
+    if (workspace && !workspaces.some((candidate) => candidate.id === workspace)) {
+      if (workspaces.length) dispatch(selectWorkspace(workspaces[0]!.id));
+      else dispatch(clearWorkspace());
+      return;
+    }
+    if (!workspace && workspaces.length) dispatch(selectWorkspace(workspaces[0]!.id));
   }, [workspace, workspaces, dispatch]);
 
   // Each finished table is on disk the moment the engine reports it, so the
@@ -93,8 +101,14 @@ export default function App() {
       <AppHeader
         output={output}
         config={config}
-        job={runningJobId ? job : (finishedJob ?? undefined)}
-        busy={Boolean(runningJobId)}
+        job={
+          runningWorkspace === workspace
+            ? job
+            : finishedJob?.workspace === workspace
+              ? finishedJob
+              : undefined
+        }
+        busy={runningWorkspace === workspace && Boolean(runningJobId)}
         jobsUnavailable={Boolean(jobsError)}
       >
         {output && (

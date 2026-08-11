@@ -15,8 +15,11 @@ source is therefore two steps, and the second is deliberately in a terminal.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -118,6 +121,20 @@ class SourceRegistry(BaseModel):
         if not target.exists():
             return cls()
         return cls.model_validate(yaml.safe_load(target.read_text()) or {})
+
+
+@contextmanager
+def source_registry_lock() -> Iterator[None]:
+    """Serialize source lifecycle with workspace binding across API/CLI processes."""
+    target = registry_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(f"{target.name}.lock")
+    with lock_path.open("a+") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def registry_path() -> Path:

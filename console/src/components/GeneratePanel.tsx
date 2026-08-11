@@ -41,7 +41,7 @@ export function GeneratePanel({
     setFailure(null);
     try {
       const started = await analyze({ workspace, limit, regenerate }).unwrap();
-      dispatch(startJob(started.id));
+      dispatch(startJob({ id: started.id, workspace }));
       setOpen(false);
     } catch (error) {
       setFailure(describeError(error));

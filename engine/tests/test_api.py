@@ -18,7 +18,8 @@ from atlas.jobs import (
 from atlas.questions import QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
-from atlas.workspace import InvalidWorkspace, Workspace
+from atlas.sources import Source, SourceRegistry
+from atlas.workspace import InvalidWorkspace, Workspace, WorkspaceManifest
 
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="executed: SELECT 1", result="pass")
 GUESS = Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from column name")
@@ -57,12 +58,18 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+def register_source(url_env: str = "ELARA_DATABASE_URL") -> None:
+    SourceRegistry(sources=[Source(id="elara", adapter="postgresql", url_env=url_env)]).write()
+
+
 def seed(name: str = "demo") -> Workspace:
     workspace = Workspace(name)
     snapshot = Snapshot(
         database="shop",
         schema_name="public",
         dialect="postgresql",
+        source_id="elara",
+        generation=1,
         tables=[
             Table(
                 schema_name="public",
@@ -72,6 +79,7 @@ def seed(name: str = "demo") -> Workspace:
             )
         ],
     )
+    workspace.write_manifest(WorkspaceManifest(id=name, source_id="elara", snapshot_generation=1))
     snapshot.write(workspace.snapshot_path)
     FactStore(
         facts=[
@@ -119,7 +127,7 @@ def test_traversal_name_is_rejected_by_the_api(client) -> None:
 def test_missing_workspace_is_404(client) -> None:
     response = client.get("/workspaces/nope/output")
     assert response.status_code == 404
-    assert "extract first" in response.json()["detail"]
+    assert "does not exist" in response.json()["detail"]
 
 
 def test_claims_are_ranked_least_certain_first(client) -> None:
@@ -193,27 +201,31 @@ def test_compile_then_read_output(client) -> None:
     assert output["tables"][0]["grain"]["text"] == "One row per order."
 
 
-def test_analyze_requires_an_api_key(client) -> None:
+def test_analyze_requires_an_api_key(client, monkeypatch) -> None:
+    register_source()
+    monkeypatch.setenv("ELARA_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
+    get_settings.cache_clear()
+    seed()
+    response = client.post("/workspaces/demo/analyze", json={"limit": 1})
+    assert response.status_code == 400
+    assert "OPENROUTER_API_KEY" in response.json()["detail"]
+
+
+def test_managed_analyze_rejects_direct_database_url(client) -> None:
     seed()
     response = client.post(
         "/workspaces/demo/analyze",
         json={"limit": 1, "database_url": "postgresql+psycopg://u:p@localhost/db"},
     )
-    assert response.status_code == 400
-    assert "OPENROUTER_API_KEY" in response.json()["detail"]
-
-
-def test_analyze_requires_a_database_url(client) -> None:
-    seed()
-    response = client.post("/workspaces/demo/analyze", json={"limit": 1})
-    assert response.status_code == 400
-    assert "ATLAS_DATABASE_URL" in response.json()["detail"]
+    assert response.status_code == 422
 
 
 def test_workspaces_are_listed_once_extracted(client) -> None:
     seed("alpha")
     seed("beta")
-    assert client.get("/workspaces").json()["workspaces"] == ["alpha", "beta"]
+    body = client.get("/workspaces").json()["workspaces"]
+    assert [workspace["id"] for workspace in body] == ["alpha", "beta"]
+    assert {workspace["source_id"] for workspace in body} == {"elara"}
 
 
 def test_unknown_job_is_404(client) -> None:
@@ -236,10 +248,15 @@ def seed_wide(name: str = "wide") -> Workspace:
         Column(name="status", data_type="VARCHAR", nullable=False),
         Column(name="amount_cents", data_type="INTEGER", nullable=False),
     ]
+    workspace.write_manifest(
+        WorkspaceManifest(id=name, source_id="elara", snapshot_generation=1)
+    )
     Snapshot(
         database="shop",
         schema_name="public",
         dialect="postgresql",
+        source_id="elara",
+        generation=1,
         tables=[
             Table(schema_name="public", name="orders", columns=columns, exact_rows=100)
         ],
@@ -383,11 +400,9 @@ def test_analyze_uses_the_source_its_snapshot_came_from(client, monkeypatch) -> 
             "namespace": "public",
         },
     )
-    workspace = seed("demo")
-    snapshot = workspace.read_snapshot()
-    snapshot.model_copy(update={"source_id": "elara"}).write(workspace.snapshot_path)
+    seed("demo")
 
-    # Accepted — the URL resolves from the source, not from ATLAS_DATABASE_URL.
+    # Accepted — the URL resolves from the bound source, not from ATLAS_DATABASE_URL.
     assert client.post("/workspaces/demo/analyze", json={"limit": 1}).status_code == 202
 
 
@@ -403,9 +418,7 @@ def test_a_missing_source_credential_explains_itself(client, monkeypatch) -> Non
             "namespace": "public",
         },
     )
-    workspace = seed("demo")
-    snapshot = workspace.read_snapshot()
-    snapshot.model_copy(update={"source_id": "elara"}).write(workspace.snapshot_path)
+    seed("demo")
 
     response = client.post("/workspaces/demo/analyze", json={"limit": 1})
     assert response.status_code == 400
@@ -413,7 +426,8 @@ def test_a_missing_source_credential_explains_itself(client, monkeypatch) -> Non
 
 
 def test_a_missing_model_key_names_the_variable(client, monkeypatch) -> None:
-    monkeypatch.setenv("ATLAS_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
+    register_source()
+    monkeypatch.setenv("ELARA_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
     get_settings.cache_clear()
     seed("demo")
     response = client.post("/workspaces/demo/analyze", json={"limit": 1})
@@ -513,9 +527,10 @@ def test_a_finished_table_is_readable_before_the_run_ends(client, monkeypatch) -
             observed.append(sorted({f.subject for f in workspace.read_facts().facts}))
         return FactStore(), QuestionLog(), EvidenceStore()
 
+    register_source()
     monkeypatch.setattr(api, "create_adapter", lambda url, **_: _NullAdapter())
     monkeypatch.setattr("atlas.agent.analyze_schema", fake_analyze)
-    monkeypatch.setenv("ATLAS_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
+    monkeypatch.setenv("ELARA_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
     get_settings.cache_clear()
 

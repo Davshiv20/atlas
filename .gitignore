@@ -11,6 +11,7 @@
 # per-install state, not project configuration: deployments mount it at
 # ATLAS_SOURCES_FILE, and tracking it put customer connection details in git.
 sources.yaml
+sources.yaml.lock
 
 # OS / editors
 .DS_Store

@@ -51,7 +51,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at TEXT,
     progress    TEXT,
     result      TEXT,
-    error       TEXT
+    error       TEXT,
+    snapshot_generation INTEGER,
+    source_id TEXT,
+    workspace_incarnation TEXT
 );
 CREATE INDEX IF NOT EXISTS jobs_by_workspace ON jobs (workspace, created_at DESC);
 CREATE INDEX IF NOT EXISTS jobs_by_status ON jobs (status);
@@ -74,6 +77,12 @@ class JobStatus(StrEnum):
 
 
 TERMINAL = frozenset({JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.INTERRUPTED})
+
+
+class ActiveWorkspaceJob(RuntimeError):
+    def __init__(self, job_id: str) -> None:
+        super().__init__(f"workspace already has an active mutation job: {job_id}")
+        self.job_id = job_id
 
 
 class JobProgress(BaseModel):
@@ -112,6 +121,9 @@ class Job(BaseModel):
     id: str
     kind: str
     workspace: str
+    snapshot_generation: int | None = None
+    source_id: str | None = None
+    workspace_incarnation: str | None = None
     status: JobStatus = JobStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
@@ -146,8 +158,11 @@ class JobRegistry:
         # busy_timeout, but a lock turns "eventually got the write lock" into
         # "waited", which is cheaper and easier to reason about.
         self._write_lock = threading.Lock()
+        self._workspace_locks_guard = threading.Lock()
+        self._workspace_locks: dict[str, threading.Lock] = {}
         with self._connect() as connection:
             connection.executescript(SCHEMA)
+            _migrate(connection)
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -169,6 +184,14 @@ class JobRegistry:
             connection.close()
 
     # --- lifecycle ---------------------------------------------------------
+
+    @contextmanager
+    def workspace_guard(self, workspace: str) -> Iterator[None]:
+        """Serialize file mutations for one workspace inside this instance."""
+        with self._workspace_locks_guard:
+            lock = self._workspace_locks.setdefault(workspace, threading.Lock())
+        with lock:
+            yield
 
     def reconcile(self) -> int:
         """Settle jobs orphaned by a previous process.
@@ -195,14 +218,36 @@ class JobRegistry:
             logger.warning("marked %d orphaned job(s) as interrupted", orphaned)
         return orphaned
 
-    def submit(self, kind: str, workspace: str, work: Callable[[ProgressReporter], dict]) -> Job:
-        job = Job(id=f"job_{uuid.uuid4().hex[:12]}", kind=kind, workspace=workspace)
-        self._insert(job)
-        self._evict()
-
-        thread = threading.Thread(target=self._run, args=(job.id, work), daemon=True)
-        thread.start()
+    def submit(
+        self,
+        kind: str,
+        workspace: str,
+        work: Callable[[ProgressReporter], dict],
+        *,
+        snapshot_generation: int | None = None,
+        source_id: str | None = None,
+        workspace_incarnation: str | None = None,
+        exclusive: bool = False,
+    ) -> Job:
+        job = Job(
+            id=f"job_{uuid.uuid4().hex[:12]}",
+            kind=kind,
+            workspace=workspace,
+            snapshot_generation=snapshot_generation,
+            source_id=source_id,
+            workspace_incarnation=workspace_incarnation,
+        )
+        self._submit(job, work, exclusive=exclusive)
         return job
+
+    def active_workspace_job(self, workspace: str) -> Job | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM jobs WHERE workspace = ? AND kind IN ('extract', 'analyze') "
+                "AND status IN (?, ?) ORDER BY created_at LIMIT 1",
+                (workspace, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+            ).fetchone()
+        return _to_job(row) if row else None
 
     def get(self, job_id: str) -> Job | None:
         with self._connect() as connection:
@@ -220,19 +265,26 @@ class JobRegistry:
             rows = connection.execute(query, parameters).fetchall()
         return [_to_job(row) for row in rows]
 
+    def delete_workspace(self, workspace: str) -> None:
+        with self._write_lock, self._connect() as connection:
+            connection.execute("DELETE FROM jobs WHERE workspace = ?", (workspace,))
+
     # --- writes ------------------------------------------------------------
 
     def record_progress(self, job_id: str, progress: JobProgress) -> None:
         self._update(job_id, progress=_dump(progress.model_dump(mode="json")))
 
-    def _run(self, job_id: str, work: Callable[[ProgressReporter], dict]) -> None:
+    def _run(
+        self, job_id: str, workspace: str, work: Callable[[ProgressReporter], dict]
+    ) -> None:
         self._update(
             job_id,
             status=JobStatus.RUNNING.value,
             started_at=datetime.now(UTC).isoformat(),
         )
         try:
-            result = work(ProgressReporter(self, job_id))
+            with self.workspace_guard(workspace):
+                result = work(ProgressReporter(self, job_id))
         except Exception as exc:
             logger.exception("job %s failed", job_id)
             # Message for the client, traceback for the log — a stack trace in
@@ -252,14 +304,41 @@ class JobRegistry:
                 finished_at=datetime.now(UTC).isoformat(),
             )
 
+    def _submit(
+        self,
+        job: Job,
+        work: Callable[[ProgressReporter], dict],
+        *,
+        exclusive: bool,
+    ) -> None:
+        with self._write_lock, self._connect() as connection:
+            if exclusive:
+                active = connection.execute(
+                    "SELECT id FROM jobs WHERE workspace = ? AND kind IN ('extract', 'analyze') "
+                    "AND status IN (?, ?) ORDER BY created_at LIMIT 1",
+                    (job.workspace, JobStatus.PENDING.value, JobStatus.RUNNING.value),
+                ).fetchone()
+                if active:
+                    raise ActiveWorkspaceJob(active["id"])
+            self._insert_locked(connection, job)
+        self._evict()
+
+        thread = threading.Thread(
+            target=self._run, args=(job.id, job.workspace, work), daemon=True
+        )
+        thread.start()
+
     def _insert(self, job: Job) -> None:
+        with self._write_lock, self._connect() as connection:
+            self._insert_locked(connection, job)
+
+    def _insert_locked(self, connection: sqlite3.Connection, job: Job) -> None:
         payload = job.model_dump(mode="json")
         for column in JSON_COLUMNS:
             payload[column] = _dump(payload[column])
         columns = ", ".join(payload)
         placeholders = ", ".join(f":{name}" for name in payload)
-        with self._write_lock, self._connect() as connection:
-            connection.execute(f"INSERT INTO jobs ({columns}) VALUES ({placeholders})", payload)
+        connection.execute(f"INSERT INTO jobs ({columns}) VALUES ({placeholders})", payload)
 
     def _update(self, job_id: str, **fields: str | None) -> None:
         assignments = ", ".join(f"{name} = :{name}" for name in fields)
@@ -282,6 +361,18 @@ class JobRegistry:
                 ")",
                 (MAX_RETAINED_JOBS,),
             )
+
+
+def _migrate(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(jobs)").fetchall()
+    }
+    if "snapshot_generation" not in columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN snapshot_generation INTEGER")
+    if "source_id" not in columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN source_id TEXT")
+    if "workspace_incarnation" not in columns:
+        connection.execute("ALTER TABLE jobs ADD COLUMN workspace_incarnation TEXT")
 
 
 def _dump(value: object | None) -> str | None:

@@ -11,6 +11,14 @@ from atlas.policy import Trust
 from atlas.snapshot import Column, ColumnProfile, Snapshot, Table, ValueCount
 
 
+@pytest.fixture(autouse=True)
+def avoid_external_model_configuration(monkeypatch) -> None:
+    """These are tool/concurrency tests; none should require an API key."""
+    from atlas import agent
+
+    monkeypatch.setattr(agent, "configure", lambda: None)
+
+
 class ScriptedAdapter(DatabaseAdapter):
     """Returns a canned measurement per check type, so the agent's tool surface
     is tested without a database."""
