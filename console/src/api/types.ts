@@ -256,10 +256,18 @@ export interface Job {
   error?: string;
 }
 
+export type SnowflakeAuthMethod =
+  | "password"
+  | "mfa_push"
+  | "mfa_totp"
+  | "external_browser";
+
 export interface SnowflakeCredentials {
   account_identifier: string;
   username: string;
-  password: string;
+  auth_method: SnowflakeAuthMethod;
+  password?: string;
+  passcode?: string;
   warehouse: string;
   role: string;
 }

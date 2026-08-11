@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { SourceStatus } from "@/api/types";
+import type { SnowflakeAuthMethod, SourceStatus } from "@/api/types";
 import { Modal } from "@/components/Modal";
 import { SourceForm } from "@/components/SourceForm";
 import {
@@ -353,7 +353,9 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
   const [editing, setEditing] = useState(!source.configured);
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [username, setUsername] = useState("");
+  const [authMethod, setAuthMethod] = useState<SnowflakeAuthMethod>("mfa_totp");
   const [password, setPassword] = useState("");
+  const [passcode, setPasscode] = useState("");
   const [warehouse, setWarehouse] = useState("");
   const [role, setRole] = useState("ATLAS_READER");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -402,13 +404,16 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
             credentials: {
               account_identifier: accountIdentifier,
               username,
-              password,
+              auth_method: authMethod,
+              ...(authMethod !== "external_browser" ? { password } : {}),
+              ...(authMethod === "mfa_totp" ? { passcode } : {}),
               warehouse,
               role,
             },
           }).unwrap();
           if (health.state === "connected") {
             setPassword("");
+            setPasscode("");
             setEditing(false);
           }
         } catch (error) {
@@ -420,19 +425,65 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
         <CredentialInput label="Account identifier" value={accountIdentifier} onChange={setAccountIdentifier} placeholder="tdrsucc-mx68221" />
         <CredentialInput label="Warehouse" value={warehouse} onChange={setWarehouse} placeholder="POC_WH" />
         <CredentialInput label="Username" value={username} onChange={setUsername} placeholder="SHIVAM" autoComplete="username" />
-        <CredentialInput label="Password or token" value={password} onChange={setPassword} placeholder="Entered securely" type="password" autoComplete="current-password" />
+        <label className="flex flex-col gap-1">
+          <span className="text-meta font-semibold uppercase tracking-wide text-ink-3">Sign-in method</span>
+          <select
+            value={authMethod}
+            onChange={(event) => setAuthMethod(event.target.value as SnowflakeAuthMethod)}
+            className="w-full rounded-[--radius-control] border border-line bg-canvas px-2.5 py-2 text-body text-ink focus:border-line-ink focus:outline-none"
+          >
+            <option value="mfa_totp">Password + authenticator code</option>
+            <option value="mfa_push">Password + MFA push</option>
+            <option value="password">Programmatic token or password</option>
+            <option value="external_browser">Corporate browser SSO (SAML)</option>
+          </select>
+        </label>
+        {authMethod !== "external_browser" && (
+          <CredentialInput label={authMethod === "password" ? "Password or token" : "Password"} value={password} onChange={setPassword} placeholder="Entered securely" type="password" autoComplete="current-password" />
+        )}
+        {authMethod === "mfa_totp" && (
+          <CredentialInput
+            label="Authenticator code · current 6-digit code"
+            value={passcode}
+            onChange={(value) => setPasscode(value.replace(/\D/g, "").slice(0, 6))}
+            placeholder="123456"
+            autoComplete="one-time-code"
+            inputMode="numeric"
+            maxLength={6}
+          />
+        )}
         <CredentialInput label="Role" value={role} onChange={setRole} placeholder="ATLAS_READER" />
       </div>
       <p className="mt-2 text-meta text-ink-3">
-        Atlas builds and encodes the connection URL on the engine. The password is never returned to this screen.
+        {authMethod === "mfa_totp"
+          ? "The code is used once and never saved. Atlas requests Snowflake's MFA token cache for later local connections."
+          : authMethod === "mfa_push"
+            ? "Saving sends an MFA approval request. Approve it while Atlas waits for Snowflake."
+            : authMethod === "external_browser"
+            ? "Use this only when the account has Okta, Entra, or another SAML provider configured."
+            : "Atlas builds and encodes the connection URL on the engine. The credential is never returned to this screen."}
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
           type="submit"
-          disabled={saving || !accountIdentifier || !username || !password || !warehouse || !role}
+          disabled={
+            saving ||
+            !accountIdentifier ||
+            !username ||
+            !warehouse ||
+            !role ||
+            (authMethod !== "external_browser" && !password) ||
+            (authMethod === "mfa_totp" && !/^\d{6}$/.test(passcode))
+          }
           className="rounded-[--radius-control] bg-cta px-3 py-1.5 text-body font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
         >
-          {saving ? "Connecting…" : "Save and test"}
+          {saving
+            ? authMethod === "mfa_push" || authMethod === "mfa_totp"
+              ? "Waiting for approval…"
+              : authMethod === "external_browser"
+                ? "Waiting for browser…"
+                : "Connecting…"
+            : "Save and test"}
         </button>
         {source.configured && (
           <button
@@ -460,6 +511,8 @@ function CredentialInput({
   placeholder,
   type = "text",
   autoComplete,
+  inputMode,
+  maxLength,
 }: {
   label: string;
   value: string;
@@ -467,6 +520,8 @@ function CredentialInput({
   placeholder: string;
   type?: string;
   autoComplete?: string;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  maxLength?: number;
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -477,6 +532,8 @@ function CredentialInput({
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        inputMode={inputMode}
+        maxLength={maxLength}
         required
         className="w-full rounded-[--radius-control] border border-line bg-canvas px-2.5 py-2 text-body text-ink placeholder:text-ink-4 focus:border-line-ink focus:outline-none"
       />

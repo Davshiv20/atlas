@@ -60,11 +60,19 @@ Snowflake keys are recorded as declared but not enforced. Hybrid-table enforceme
 clustering-key metadata are not represented yet. Treat the adapter as early until it has
 passed against the target account.
 
-Snowflake URL:
+Snowflake password or programmatic-token URL:
 
 ```text
 snowflake://USER:PASSWORD@ACCOUNT/DATABASE/SCHEMA?warehouse=WAREHOUSE&role=ATLAS_READER
 ```
+
+For an interactive human login, `auth_method=mfa_push` passes
+`authenticator=username_password_mfa` to the Snowflake connector and waits for the user
+to approve the second factor. `auth_method=mfa_totp` additionally accepts a current TOTP
+passcode for the initial probe. The code is never persisted; both MFA modes request the
+connector's MFA token cache for later local connections. `auth_method=external_browser` is reserved for accounts
+with a configured SAML identity provider; it creates a passwordless URL with
+`authenticator=externalbrowser` and opens the system browser from the engine process.
 
 Use a role with `USAGE` on the warehouse/database/schema and `SELECT` on the intended
 objects. Set the source namespace to `DATABASE.SCHEMA`.

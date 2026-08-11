@@ -1649,12 +1649,44 @@
             "minLength": 1,
             "title": "Username"
           },
-          "password": {
+          "auth_method": {
             "type": "string",
-            "minLength": 1,
-            "format": "password",
-            "title": "Password",
-            "writeOnly": true
+            "enum": [
+              "password",
+              "mfa_push",
+              "mfa_totp",
+              "external_browser"
+            ],
+            "title": "Auth Method",
+            "default": "password"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "passcode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Passcode"
           },
           "warehouse": {
             "type": "string",
@@ -1671,7 +1703,6 @@
         "required": [
           "account_identifier",
           "username",
-          "password",
           "warehouse",
           "role"
         ],

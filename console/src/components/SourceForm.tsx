@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import type { SnowflakeCredentials } from "@/api/types";
+import type { SnowflakeAuthMethod, SnowflakeCredentials } from "@/api/types";
 
 /**
  * The connection form. Shared by setup and the sources screen so there is one
@@ -39,7 +39,9 @@ export function SourceForm({
   const [urlEnv, setUrlEnv] = useState("");
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [username, setUsername] = useState("");
+  const [authMethod, setAuthMethod] = useState<SnowflakeAuthMethod>("mfa_totp");
   const [password, setPassword] = useState("");
+  const [passcode, setPasscode] = useState("");
   const [warehouse, setWarehouse] = useState("");
   const [role, setRole] = useState("ATLAS_READER");
 
@@ -64,7 +66,9 @@ export function SourceForm({
                 snowflake_credentials: {
                   account_identifier: accountIdentifier,
                   username,
-                  password,
+                  auth_method: authMethod,
+                  ...(authMethod !== "external_browser" ? { password } : {}),
+                  ...(authMethod === "mfa_totp" ? { passcode } : {}),
                   warehouse,
                   role,
                 },
@@ -156,17 +160,48 @@ export function SourceForm({
               className={INPUT}
             />
           </Field>
-          <Field label="Password or token">
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Entered securely"
-              autoComplete="current-password"
-              required
+          <Field label="Sign-in method">
+            <select
+              value={authMethod}
+              onChange={(event) => setAuthMethod(event.target.value as SnowflakeAuthMethod)}
               className={INPUT}
-            />
+            >
+              <option value="mfa_totp">Password + authenticator code</option>
+              <option value="mfa_push">Password + MFA push</option>
+              <option value="password">Programmatic token or password</option>
+              <option value="external_browser">Corporate browser SSO (SAML)</option>
+            </select>
           </Field>
+          {authMethod !== "external_browser" && (
+            <Field label={authMethod === "password" ? "Password or token" : "Password"}>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Entered securely"
+                autoComplete="current-password"
+                required
+                className={INPUT}
+              />
+            </Field>
+          )}
+          {authMethod === "mfa_totp" && (
+            <Field label="Authenticator code" hint="current 6-digit code">
+              <input
+                value={passcode}
+                onChange={(event) =>
+                  setPasscode(event.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                placeholder="123456"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                pattern="[0-9]{6}"
+                required
+                className={`${INPUT} font-mono`}
+              />
+            </Field>
+          )}
           <Field label="Role">
             <input
               value={role}
@@ -177,8 +212,13 @@ export function SourceForm({
             />
           </Field>
           <p className="self-end pb-1 text-meta text-ink-3">
-            Atlas encodes the password and builds the connection URL on the engine. The
-            saved secret is never returned to the browser.
+            {authMethod === "mfa_totp"
+              ? "The code is used once for this connection and is never saved. Atlas requests Snowflake's MFA token cache for later local connections."
+              : authMethod === "mfa_push"
+                ? "Saving sends an MFA approval request. Approve it while Atlas waits for Snowflake."
+                : authMethod === "external_browser"
+                ? "For accounts configured with Okta, Entra, or another SAML provider. Snowflake opens that provider in your browser."
+                : "Atlas encodes the credential on the engine. The saved secret is never returned to the browser."}
           </p>
         </div>
       )}
@@ -217,11 +257,23 @@ export function SourceForm({
             busy ||
             !id ||
             !effectiveEnv ||
-            (snowflake && (!accountIdentifier || !username || !password || !warehouse || !role))
+            (snowflake &&
+              (!accountIdentifier ||
+                !username ||
+                !warehouse ||
+                !role ||
+                (authMethod !== "external_browser" && !password) ||
+                (authMethod === "mfa_totp" && !/^\d{6}$/.test(passcode))))
           }
           className="rounded-[--radius-control] bg-cta px-4 py-2 text-body font-medium text-cta-ink transition-colors hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4"
         >
-          {busy ? "Saving…" : submitLabel}
+          {busy
+            ? snowflake && (authMethod === "mfa_push" || authMethod === "mfa_totp")
+              ? "Waiting for approval…"
+              : snowflake && authMethod === "external_browser"
+                ? "Waiting for browser…"
+                : "Saving…"
+            : submitLabel}
         </button>
         {onCancel && (
           <button
@@ -334,10 +386,10 @@ GRANT ROLE ATLAS_READER TO USER YOUR_USER;`;
       </details>
 
       <p className="mt-3 border-t border-line pt-2 text-meta text-ink-3">
-        <span className="font-semibold text-ink-2">2. Enter the normal connection fields below.</span>{" "}
-        Atlas builds and URL-encodes the connection string on the engine. Browser SSO
-        cannot be used directly; ask an administrator for a programmatic password or token
-        if your company requires SSO.
+        <span className="font-semibold text-ink-2">2. Choose how to sign in below.</span>{" "}
+        Use password + MFA push for a Snowflake-managed human login. Corporate browser
+        SSO requires a configured SAML provider. Use a programmatic token or key pair for
+        a deployed connection.
       </p>
     </section>
   );

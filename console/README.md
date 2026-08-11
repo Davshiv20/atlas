@@ -36,9 +36,15 @@ concepts, although the UI still needs clearer cached/offline labelling.
 PostgreSQL is established. Snowflake is available as an early adapter for connection,
 reflection, profiling, and typed checks; validate it against the target account before
 production use. When Snowflake is selected, the source form includes a setup helper that
-parses a Snowsight schema URL, fills `DATABASE.SCHEMA`, collects normal credential
+parses a Snowsight schema URL, fills `DATABASE.SCHEMA`, collects normal connection
 fields, and provides read-only grant SQL for an administrator. The engine constructs and
-URL-encodes the connection string; users never build it manually.
+URL-encodes the connection string; users never build it manually. Human users can choose
+**Password + authenticator code** for TOTP or **Password + MFA push** and complete
+Snowflake's second factor while Atlas waits. A TOTP code is used only for the initial
+connection and is never persisted. Corporate browser SSO is also available when the
+account has a SAML identity provider configured.
+Deployed connections should use non-interactive credentials such as a programmatic token
+or key pair.
 
 ### Map
 
