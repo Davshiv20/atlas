@@ -30,6 +30,7 @@ Thumbs.db
 
 # Agent scratch
 .pi-subagents/
+.hallmark/
 # Scraped third-party assets from the design workflow — someone else's site,
 # and regenerable. Never part of the repo.
 .firecrawl/
