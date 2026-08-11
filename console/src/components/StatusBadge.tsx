@@ -44,7 +44,7 @@ const CLAIM_TONE: Record<ClaimStatus, { tone: Tone; label: string; title?: strin
     tone: "neutral",
     label: "Accepted",
     title:
-      "Accepted without human review: routine column, grounded, high confidence. Not verified.",
+      "Accepted without human review: routine column with a strong evidence-derived trust score. Not verified.",
   },
   unverified: { tone: "generated", label: "AI generated" },
   rejected: { tone: "failed", label: "Rejected" },

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -16,7 +16,7 @@ from atlas.evidence import (
     Scope,
     Verdict,
 )
-from atlas.policy import Trust, evaluate
+from atlas.policy import Trust, TrustBand, assess, evaluate
 
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
 
@@ -117,6 +117,33 @@ def test_no_evidence_means_unsupported() -> None:
     assert trust is Trust.UNSUPPORTED
     assert score < 0.3
     assert reasons == ["no supporting evidence"]
+
+
+def test_confidence_is_a_factorized_trust_score_not_a_fixed_state_value() -> None:
+    complete = record()
+    sampled = record(scope=Scope(complete_scan=False, sampled=True, sample_fraction=0.01))
+
+    complete_assessment = assess("semantics", [(link(complete), complete)], now=NOW)
+    sampled_assessment = assess("semantics", [(link(sampled), sampled)], now=NOW)
+
+    assert complete_assessment.state is Trust.OBSERVED
+    assert sampled_assessment.state is Trust.OBSERVED
+    assert complete_assessment.confidence > sampled_assessment.confidence
+    assert complete_assessment.factors.coverage == 1.0
+    assert sampled_assessment.factors.coverage < 0.7
+    assert complete_assessment.band is TrustBand.STRONGLY_SUPPORTED
+
+
+def test_stale_evidence_lowers_freshness_and_confidence() -> None:
+    fresh = record()
+    stale = record(freshness=Freshness(valid_as_of=NOW - timedelta(days=500)))
+
+    fresh_assessment = assess("join", [(link(fresh), fresh)], now=NOW)
+    stale_assessment = assess("join", [(link(stale), stale)], now=NOW)
+
+    assert fresh_assessment.factors.freshness == 1.0
+    assert stale_assessment.factors.freshness == 0.55
+    assert fresh_assessment.confidence > stale_assessment.confidence
 
 
 def test_warning_verdict_costs_confidence_without_hiding_the_pass() -> None:

@@ -85,6 +85,11 @@ Atlas compiles the SQL, executes it through the adapter, and stores:
 A check can establish structural consistency. It cannot establish business meaning by
 itself.
 
+Claim confidence is an evidence-derived trust score, not probability. It combines
+directness, authority, coverage, consistency, and freshness. The complete factor
+breakdown travels with newly evaluated claims; consequence remains a separate review-
+priority signal.
+
 ## Sources and credentials
 
 Declared sources live in `sources.yaml` and contain only identifiers and environment
@@ -155,13 +160,15 @@ refetches workspace output as completed tables are persisted.
 | `ATLAS_MAX_ROWS` | `50` |
 | `ATLAS_STATEMENT_TIMEOUT_MS` | `15000` |
 | `ATLAS_OUTPUT_DIR` | `out` |
-| `ATLAS_SAMPLE_POLICY` | `strict` |
+| `ATLAS_SAMPLE_POLICY` | `strict` in code; `.env.example` sets `full` so the review sheet shows raw samples. |
 
 ## Security
 
 Use a source role with `SELECT` and nothing else. PostgreSQL checks also run in a
-read-only transaction with a statement timeout. Strict profiling withholds sensitive,
-opaque, free-text, key, and high-cardinality values from model input.
+read-only transaction with a statement timeout. The review workflow is easiest with
+`ATLAS_SAMPLE_POLICY=full`, because samples are shown in the table sheet. If strict
+profiling is enabled, Atlas withholds sensitive, opaque, free-text, key, and
+high-cardinality values and shows the withholding reason instead.
 
 These process-level guards are defence in depth. Database permissions remain the
 primary security boundary.

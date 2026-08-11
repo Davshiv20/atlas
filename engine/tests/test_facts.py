@@ -10,9 +10,25 @@ from atlas.facts import (
     Provenance,
     ProvenanceKind,
 )
+from atlas.policy import Trust, TrustAssessment, TrustFactors
 
 LLM = Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="inferred from column name")
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="orphan rate 0.0%", result="pass")
+
+
+def assessment(confidence: float = 0.84) -> TrustAssessment:
+    return TrustAssessment(
+        state=Trust.OBSERVED,
+        confidence=confidence,
+        factors=TrustFactors(
+            evidence_directness=0.9,
+            authority=0.82,
+            coverage=1.0,
+            consistency=1.0,
+            freshness=1.0,
+        ),
+        reasons=["complete scan"],
+    )
 
 
 def make_fact(**overrides) -> Fact:
@@ -39,6 +55,21 @@ def test_ungrounded_fact_cannot_be_verified() -> None:
 def test_grounded_fact_may_exceed_ceiling() -> None:
     fact = make_fact(confidence=0.95, provenance=[LLM, CHECK])
     assert fact.confidence == 0.95
+
+
+def test_confidence_must_match_the_stored_trust_assessment() -> None:
+    with pytest.raises(ValidationError, match="must equal the evidence-derived trust score"):
+        make_fact(confidence=0.80, trust=assessment(0.84), provenance=[CHECK])
+
+
+def test_trust_assessment_round_trips_with_the_fact(tmp_path) -> None:
+    fact = make_fact(confidence=0.84, trust=assessment(), provenance=[CHECK])
+    path = tmp_path / "facts.yaml"
+    FactStore(facts=[fact]).write(path)
+    loaded = FactStore.read(path).facts[0]
+    assert loaded.trust == fact.trust
+    assert loaded.trust is not None
+    assert loaded.trust.band.value == "strongly_supported"
 
 
 def test_merge_carries_verdict_when_claim_unchanged() -> None:

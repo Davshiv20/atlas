@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import type { ClaimStatus } from "@/api/types";
+import type { ClaimStatus, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
-import { Key } from "@/components/ReviewQueue";
 import { Badge } from "@/components/StatusBadge";
+import { Button, Key } from "@/components/ui/Button";
 import type { QueueItem } from "@/lib/queue";
-import { canVerify, confidenceLabel } from "@/lib/review";
+import { canVerify, confidenceLabel, trustPercent } from "@/lib/review";
 import { useReviewMutation } from "@/store/api";
 import { useAppSelector } from "@/store";
 
@@ -90,12 +90,13 @@ export function ClaimCard({
         {!item.claim.grounded && <Badge tone="generated">AI generated</Badge>}
         <span
           className={`ml-auto rounded-full px-2 py-[2px] text-meta font-medium ${
-            item.claim.confidence < 0.7
+            item.claim.confidence < 0.5
               ? "bg-amber-soft text-amber-strong"
               : "bg-teal-soft text-teal-strong"
           }`}
+          title="Evidence-derived trust score; not a probability"
         >
-          {label} {item.claim.confidence.toFixed(2)}
+          Trust {trustPercent(item.claim.confidence)}/100 · {label}
         </span>
       </header>
 
@@ -127,11 +128,18 @@ export function ClaimCard({
 
         <div>
           <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">
-            {item.claim.confidence < 0.7 ? "Why low" : "What this rests on"}
+            Trust basis
           </p>
           <p className="mt-1.5 text-body text-ink-2">{detail}</p>
         </div>
       </div>
+
+      {item.claim.trust && (
+        <TrustBreakdown
+          factors={item.claim.trust.factors}
+          limitations={item.claim.trust.limitations}
+        />
+      )}
 
       {error && (
         <p className="mt-3 rounded-[--radius-control] border border-red/25 bg-red-soft px-3 py-2 text-body text-red">
@@ -139,32 +147,32 @@ export function ClaimCard({
         </p>
       )}
 
+      {/* Shortcut hints sit beside their button, never inside it: a bordered
+          chip within a filled control is what made these read as lumpy. */}
       <footer className="mt-4 flex flex-wrap items-center gap-2">
         {editing ? (
           <>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={isLoading || !draft.trim()}
               onClick={() => void submit("verified", draft.trim())}
-              className={PRIMARY}
             >
               Save and approve
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="ghost"
               onClick={() => {
                 setEditing(false);
                 setDraft(item.claim.text);
               }}
-              className="rounded-[--radius-control] px-3 py-2 text-body text-ink-2 hover:text-ink"
             >
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               disabled={isLoading || !verifiable}
               onClick={() => void submit("verified")}
               title={
@@ -172,21 +180,18 @@ export function ClaimCard({
                   ? undefined
                   : "Nothing was run that could have contradicted this — edit it or ask a question instead"
               }
-              className={PRIMARY}
             >
-              Approve <Key>A</Key>
-            </button>
-            <button type="button" onClick={() => setEditing(true)} className={SECONDARY}>
-              Edit <Key>E</Key>
-            </button>
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => void submit("rejected")}
-              className="flex items-center gap-2 rounded-[--radius-control] px-3 py-2 text-body text-red hover:bg-red-soft"
-            >
-              Reject <Key>R</Key>
-            </button>
+              Approve
+            </Button>
+            <Key>A</Key>
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Edit
+            </Button>
+            <Key>E</Key>
+            <Button variant="danger" disabled={isLoading} onClick={() => void submit("rejected")}>
+              Reject
+            </Button>
+            <Key>R</Key>
           </>
         )}
       </footer>
@@ -194,8 +199,48 @@ export function ClaimCard({
   );
 }
 
-const PRIMARY =
-  "flex items-center gap-2 rounded-[--radius-control] bg-cta px-3 py-2 text-body font-medium text-cta-ink transition-colors hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4";
+function TrustBreakdown({
+  factors,
+  limitations,
+}: {
+  factors: TrustFactors;
+  limitations: string[];
+}) {
+  const entries: [string, number][] = [
+    ["Directness", factors.evidence_directness],
+    ["Authority", factors.authority],
+    ["Coverage", factors.coverage],
+    ["Consistency", factors.consistency],
+    ["Freshness", factors.freshness],
+  ];
 
-const SECONDARY =
-  "flex items-center gap-2 rounded-[--radius-control] border border-line bg-surface px-3 py-2 text-body text-ink hover:bg-raised";
+  return (
+    <section className="mt-4 border-t border-line pt-3">
+      <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">
+        Trust score factors
+      </p>
+      <div className="mt-2 grid gap-2 sm:grid-cols-5">
+        {entries.map(([name, value]) => (
+          <div key={name} className="rounded-[--radius-control] bg-raised px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2 text-meta text-ink-3">
+              <span>{name}</span>
+              <span className="tabular-nums">{Math.round(value * 100)}</span>
+            </div>
+            <span className="mt-1 block h-1 overflow-hidden rounded-full bg-sunken">
+              <span
+                className="block h-full rounded-full bg-teal"
+                style={{ width: `${Math.round(value * 100)}%` }}
+              />
+            </span>
+          </div>
+        ))}
+      </div>
+      {limitations.length > 0 && (
+        <p className="mt-2 text-meta text-ink-3">
+          <span className="font-semibold">Limits:</span> {limitations.slice(0, 2).join(" · ")}
+        </p>
+      )}
+    </section>
+  );
+}
+

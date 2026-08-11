@@ -37,10 +37,10 @@ import engine internals or maintain an independent interpretation of API models.
 - Typed grain, join, distribution, nullability, and ordering checks.
 - Structured evidence with assertion, observation, scope, verdict, limitations,
   freshness, and query hash.
-- Atomic semantic claims with provenance and grounding rules.
+- Atomic semantic claims with provenance, grounding rules, and factorized confidence as an evidence-derived trust score.
 - Deterministic relationship discovery from constraints and schema conventions.
 - Human review for claims and questions that database evidence cannot settle.
-- A review console with Sources, Map, Review, and Questions surfaces.
+- A review console with Sources, Map, table-sheet Review, and Questions surfaces.
 - A derived semantic view for agent consumption.
 
 Snowflake appears in the source model and UI as the next adapter, but the driver and

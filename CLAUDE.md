@@ -41,14 +41,16 @@ driver dependencies, cost controls, and integration tests exist.
 1. Physical observations and semantic inference are separate.
 2. Semantic claims are atomic, attributable, reviewable, and versioned.
 3. The model must not decide whether its own evidence passed.
-4. Ungrounded claims cannot be presented as verified.
-5. Unknown meaning remains explicit; never manufacture certainty.
-6. Human review targets consequential business pivots, not every field description.
-7. Multiple agents reuse one shared semantic model through objective-specific context
+4. Confidence is an evidence-derived trust score with an inspectable factor breakdown; it is never model self-confidence or probability.
+5. Review priority is separate from confidence and is driven by consequence and task impact.
+6. Ungrounded claims cannot be presented as verified.
+7. Unknown meaning remains explicit; never manufacture certainty.
+8. Human review targets consequential business pivots, not every field description.
+9. Multiple agents reuse one shared semantic model through objective-specific context
    views.
-8. Source access is read-only and privacy-safe by default.
-9. Agents receive typed checks and semantic interfaces, not unrestricted database SQL.
-10. Derived output is never edited as an authoritative source.
+10. Source access is read-only and privacy-safe by default.
+11. Agents receive typed checks and semantic interfaces, not unrestricted database SQL.
+12. Derived output is never edited as an authoritative source.
 
 ## Current persistence
 

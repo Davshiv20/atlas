@@ -17,14 +17,65 @@ export type ClaimStatus = "unverified" | "auto_accepted" | "verified" | "rejecte
 /** What breaks downstream if the claim is wrong. Drives review order. */
 export type Consequence = "critical" | "high" | "routine";
 
+/** What kind of evidence established a claim. Separate from review status. */
+export type TrustState =
+  | "unsupported"
+  | "signal"
+  | "observed"
+  | "verified"
+  | "enforced"
+  | "authoritative"
+  | "contradicted";
+
+export type TrustBand =
+  | "unsupported"
+  | "weak_signals"
+  | "plausible"
+  | "strongly_supported"
+  | "highly_trusted"
+  | "authoritative_or_enforced"
+  | "conflicted";
+
+export interface TrustFactors {
+  evidence_directness: number;
+  authority: number;
+  coverage: number;
+  consistency: number;
+  freshness: number;
+}
+
+/** Inspectable composition of confidence. Confidence is a trust score, not probability. */
+export interface TrustAssessment {
+  state: TrustState;
+  confidence: number;
+  factors: TrustFactors;
+  reasons: string[];
+  limitations: string[];
+  band: TrustBand;
+}
+
+export interface EvidenceFinding {
+  relationship: string;
+  verdict: string;
+  title: string;
+  result: string;
+  details: string[];
+  evidence_id: string;
+  query_hash?: string;
+}
+
 /** A single assertion, as it appears embedded in the output document. */
 export interface Claim {
   text: string;
+  /** Evidence-derived trust score from 0..1, not model certainty. */
   confidence: number;
+  /** Missing only on legacy claims written before factor breakdowns existed. */
+  trust?: TrustAssessment;
   status: ClaimStatus;
   /** True when an executed check could have falsified the claim and did not. */
   grounded: boolean;
   evidence?: string;
+  findings: EvidenceFinding[];
   consequence: Consequence;
 }
 
@@ -128,7 +179,9 @@ export interface Fact {
   subject: string;
   aspect: string;
   claim: string;
+  /** Evidence-derived trust score from 0..1, not model certainty. */
   confidence: number;
+  trust?: TrustAssessment;
   provenance: Provenance[];
   status: ClaimStatus;
   consequence: Consequence;

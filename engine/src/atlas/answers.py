@@ -41,7 +41,7 @@ from atlas.facts import (
     Provenance,
     ProvenanceKind,
 )
-from atlas.policy import evaluate
+from atlas.policy import assess
 from atlas.questions import Question
 
 
@@ -77,7 +77,12 @@ def record_answer(
     # must keep contradicting it.
     pairs = evidence.for_claim(claim_id)
     evidence.link(link)
-    trust, score, reasons = evaluate(question.aspect, [*pairs, (link, record)])
+    assessment = assess(question.aspect, [*pairs, (link, record)])
+    trust, score, reasons = (
+        assessment.state,
+        assessment.confidence,
+        assessment.reasons,
+    )
 
     settled = Fact(
         subject=question.subject,
@@ -85,6 +90,7 @@ def record_answer(
         discriminator=discriminator,
         claim=question.answer,
         confidence=score,
+        trust=assessment,
         provenance=[
             *(existing.provenance if existing else []),
             Provenance(

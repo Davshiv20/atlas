@@ -56,36 +56,37 @@ export function canVerify(claim: Pick<Claim, "grounded">): boolean {
   return claim.grounded;
 }
 
-/** confidence in words, since a bare 0.75 means nothing. */
-export function confidenceLabel(claim: Pick<Claim, "confidence" | "grounded">): {
+/**
+ * Confidence in words. It is an evidence-derived trust score, never the model's
+ * estimate of its own probability of being correct.
+ */
+export function confidenceLabel(claim: Pick<Claim, "confidence" | "grounded" | "trust">): {
   label: string;
   detail: string;
 } {
-  if (!claim.grounded) {
+  if (claim.trust) {
+    const label = claim.trust.band
+      .split("_")
+      .map((word) => word[0]!.toUpperCase() + word.slice(1))
+      .join(" ");
+    const detail = claim.trust.reasons.slice(0, 2).join(" · ");
     return {
-      label: "Unverified guess",
-      detail:
-        "No query was run that could have contradicted this. It rests on the column name, its shape, and sample values alone.",
+      label,
+      detail: detail || "Calculated from the evidence factors shown below.",
     };
   }
-  if (claim.confidence >= 0.9) {
-    return {
-      label: "High confidence",
-      detail:
-        "A check ran that could have contradicted this and did not — on the data present at capture. That is not a guarantee about data you have not seen.",
-    };
-  }
-  if (claim.confidence >= 0.7) {
-    return {
-      label: "Medium confidence",
-      detail:
-        "Backed by an executed check, but the model was itself unsure. Worth reading the evidence before approving.",
-    };
-  }
+
+  // Legacy claims retain their old scalar until they are regenerated. Be
+  // explicit about the missing breakdown rather than reverse-engineering one.
   return {
-    label: "Low confidence",
-    detail: "Backed by a check, but the model reported low certainty.",
+    label: claim.grounded ? "Legacy trust score" : "Legacy unsupported score",
+    detail:
+      "This claim predates trust-factor breakdowns. Regenerate it to see directness, authority, coverage, consistency, and freshness.",
   };
+}
+
+export function trustPercent(confidence: number): number {
+  return Math.round(confidence * 100);
 }
 
 export function columnSummary(column: ColumnOutput): string {

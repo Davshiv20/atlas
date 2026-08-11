@@ -312,6 +312,26 @@ A semantic claim is an explicit interpretation derived from evidence.
 
 Claims should be atomic, reviewable, versionable, and attributable.
 
+### Confidence as a trust score
+
+Confidence remains part of every claim, but it is an evidence-derived trust score—not a statistical probability and never the model's opinion of its own correctness.
+
+The score should vary within a trust state according to:
+
+- evidence directness;
+- evidence authority;
+- data coverage;
+- consistency across supporting and contradicting observations;
+- freshness.
+
+The score must remain explainable through its factor breakdown, reasons, and limitations. Trust state, confidence, and review priority answer different questions:
+
+```text
+State: What kind of evidence established this claim?
+Confidence: How strong is the evidence-derived case?
+Review priority: How consequential would it be to get this wrong?
+```
+
 ## 10. Trust States
 
 Avoid a simple approved / unapproved model.
@@ -420,7 +440,7 @@ Humans should review only high-impact ambiguity.
 
 ### Review priority
 
-A claim's priority can be based on:
+A claim's priority is separate from its confidence/trust score and can be based on:
 
 ```text
 uncertainty
@@ -480,22 +500,32 @@ The primary product UI should be a semantic review workbench, not an ER diagram.
 
 Shows only entities and source objects relevant to the agent objective.
 
-#### Claim review queue
+#### Table review sheet
 
-Ranked by impact and uncertainty.
+A developer-readable sheet for one table at a time. Every column remains visible, but only rows that need attention are highlighted.
 
-Each item should show:
+Each row should show:
 
-- proposal
-- confidence
-- observed evidence
-- inferred evidence
-- contradictions
-- sample values
-- source descriptions
-- affected concepts
-- affected agent tasks/tools
-- approve / edit / reject / unresolved
+- field or semantic role;
+- proposed interpretation;
+- sample values or explicit sample-withholding reason;
+- confidence as trust score;
+- review reason;
+- compact lineage from source column to evidence to claim to YAML output;
+- observed evidence;
+- contradictions when present;
+- approve / edit / reject / unresolved.
+
+Highlighting is risk-based, not confidence-only:
+
+```text
+highlight when evidence conflicts,
+or an automatic check failed,
+or multiple meanings look possible,
+or a high-impact claim is not validated.
+```
+
+Routine rows should be visible but quiet. The reviewer should touch exceptions, not approve every column.
 
 #### Entity view
 

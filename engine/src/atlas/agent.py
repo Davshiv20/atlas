@@ -29,7 +29,7 @@ from atlas.classify import consequence, worth_describing
 from atlas.evidence import ClaimEvidence, EvidenceRecord, EvidenceStore, LinkKind, Verdict
 from atlas.facts import Consequence, Fact, FactStatus, FactStore, Provenance, ProvenanceKind
 from atlas.llm import Tool, build_client, run_tool_loop
-from atlas.policy import Trust, evaluate
+from atlas.policy import Trust, assess
 from atlas.questions import Question, QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
@@ -322,7 +322,12 @@ def build_tools(
             for e in evidence_ids
         ]
         pairs = [(link, records[link.evidence_id]) for link in links]
-        trust, score, reasons = evaluate(aspect, pairs)
+        assessment = assess(aspect, pairs)
+        trust, score, reasons = (
+            assessment.state,
+            assessment.confidence,
+            assessment.reasons,
+        )
 
         if trust is Trust.UNSUPPORTED and weight is not Consequence.ROUTINE:
             return (
@@ -337,6 +342,7 @@ def build_tools(
                 aspect=aspect,
                 claim=claim,
                 confidence=score,
+                trust=assessment,
                 provenance=[
                     Provenance(
                         kind=ProvenanceKind.GROUNDED_CHECK

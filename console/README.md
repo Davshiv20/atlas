@@ -43,12 +43,17 @@ is an inspection surface, not the primary validation workflow.
 
 ### Review
 
-Review generated claims in consequence-aware order. Each claim can expose its proposal,
-confidence, provenance, evidence, and current decision. The engine rejects attempts to
-verify claims that lack sufficient grounding.
+Review one table at a time in a spreadsheet-like sheet. All fields stay visible, but only
+risky rows are highlighted. Yellow means the row deserves human attention; red means
+conflicting evidence or very weak support on an important claim. Routine rows can stay
+inferred without becoming review work.
 
-The long-term review model is risk-based: business pivots and representative cases,
-not approval of every generated field description.
+Each row shows source shape, suggested meaning, sample values, trust score, review reason,
+and an expandable lineage chain from source column to evidence to claim to YAML output.
+If a snapshot was extracted with samples withheld, the row says why and points to
+`ATLAS_SAMPLE_POLICY=full` for raw samples. Confidence is a trust score—not model
+certainty or a probability. Consequence remains separate and drives the highlighting. The
+engine rejects attempts to verify claims that lack sufficient grounding.
 
 ### Questions
 

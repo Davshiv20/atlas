@@ -1,161 +1,232 @@
-import type { Claim, SchemaOutput, TableOutput } from "@/api/types";
+import type { Claim, ColumnOutput, Consequence, EvidenceFinding, SchemaOutput, TableOutput } from "@/api/types";
 import { claimId, columnClaimId } from "@/lib/review";
 
 /**
- * The review queue: every decision still outstanding, in the order it should
- * be taken.
+ * Table-level review model.
  *
- * The table list was never the work. It answered "what exists", and a reviewer
- * then had to open each table and hunt for the claims inside it that nobody
- * had judged. This inverts that — the claims are the list, and the tables are
- * how far through it you are.
+ * The workbench should feel like reading a schema sheet, not clicking through
+ * a stack of cards. Every table row is visible; only risky rows are highlighted.
  */
+
+export type Filter = "needs-review" | "weak-trust" | "all";
+export type Risk = "red" | "yellow" | "none";
 
 export interface QueueItem {
   id: string;
   table: string;
-  /** `grain`, `table description`, or the column name — what is being judged. */
   label: string;
   kind: "grain" | "description" | "column";
   claim: Claim;
 }
 
+export interface ReviewRow {
+  id: string;
+  table: string;
+  role: string;
+  source: string;
+  proposed: string;
+  dataType?: string;
+  samples: string[];
+  sampleNote?: string;
+  findings: EvidenceFinding[];
+  lineage: string[];
+  consequence: Consequence;
+  claim?: Claim;
+  risk: Risk;
+  reason: string;
+}
+
 export interface TableProgress {
   table: TableOutput;
-  settled: number;
-  total: number;
-  /** Outstanding claims, so the ledger and the queue can never disagree. */
-  outstanding: number;
+  highlighted: number;
+  weakTrust: number;
+  totalRows: number;
 }
 
 export interface Queue {
-  items: QueueItem[];
-  inProgress: TableProgress[];
-  done: TableProgress[];
+  tables: TableProgress[];
+  needsReview: TableProgress[];
+  quiet: TableProgress[];
 }
 
-/** Critical first: a wrong grain makes an agent write silently wrong SQL. */
-const WEIGHT = { critical: 0, high: 1, routine: 2 } as const;
-
 export function buildQueue(output: SchemaOutput, filter: Filter = "needs-review"): Queue {
-  const progress = output.tables
+  const tables = output.tables
     .filter((table) => table.analyzed)
     .map(toProgress)
-    .sort((a, b) => b.outstanding - a.outstanding || a.table.name.localeCompare(b.table.name));
-
-  const items = progress
-    .filter((entry) => entry.outstanding > 0)
-    .flatMap((entry) => claimsOf(entry.table))
-    .filter((item) => matches(item, filter))
-    .sort(byUrgency);
+    .filter((entry) => matchesTable(entry, filter))
+    .sort(byAttention);
 
   return {
-    items,
-    inProgress: progress.filter((entry) => entry.outstanding > 0),
-    done: progress.filter((entry) => entry.outstanding === 0),
+    tables,
+    needsReview: tables.filter((entry) => entry.highlighted > 0),
+    quiet: tables.filter((entry) => entry.highlighted === 0),
   };
 }
 
-export type Filter = "needs-review" | "low-confidence" | "all";
-
 export function countFor(output: SchemaOutput, filter: Filter): number {
-  return buildQueue(output, filter).items.length;
+  if (filter === "all") return output.tables.filter((table) => table.analyzed).length;
+  return buildQueue(output, filter).tables.length;
 }
 
-function matches(item: QueueItem, filter: Filter): boolean {
-  if (filter === "low-confidence") return item.claim.confidence < 0.7;
-  return true;
+export function rowsFor(table: TableOutput, filter: Filter = "all"): ReviewRow[] {
+  return allRows(table).filter((row) => matchesRow(row, filter));
 }
 
-/**
- * Consequence first, then least-confident.
- *
- * Confidence ascending rather than descending on purpose: the claims a
- * reviewer can most improve are the ones the evidence supports least, and a
- * queue sorted the other way spends the first hour approving things that were
- * already near-certain.
- */
-function byUrgency(a: QueueItem, b: QueueItem): number {
-  const weight = WEIGHT[a.claim.consequence] - WEIGHT[b.claim.consequence];
-  if (weight !== 0) return weight;
-  if (a.claim.confidence !== b.claim.confidence) return a.claim.confidence - b.claim.confidence;
-  return a.id.localeCompare(b.id);
+export function needsReview(row: ReviewRow): boolean {
+  return row.risk !== "none";
 }
 
 function toProgress(table: TableOutput): TableProgress {
-  const { critical_total, critical_settled, high_total, high_settled } = table.validation;
-  const total = critical_total + high_total;
-  const settled = critical_settled + high_settled;
-  return { table, settled, total, outstanding: claimsOf(table).length };
+  const rows = allRows(table);
+  return {
+    table,
+    highlighted: rows.filter(needsReview).length,
+    weakTrust: rows.filter((row) => (row.claim?.confidence ?? 1) < 0.5).length,
+    totalRows: rows.length,
+  };
 }
 
-/** Every unsettled claim on a table, as queue items. */
-function claimsOf(table: TableOutput): QueueItem[] {
-  const items: QueueItem[] = [];
+function allRows(table: TableOutput): ReviewRow[] {
+  const rows: ReviewRow[] = [];
 
-  if (unsettled(table.grain)) {
-    items.push({
-      id: claimId(table.name, "grain"),
-      table: table.name,
-      label: "grain",
-      kind: "grain",
-      claim: table.grain!,
-    });
-  }
-  if (unsettled(table.description)) {
-    items.push({
-      id: claimId(table.name, "semantics"),
-      table: table.name,
-      label: "table description",
-      kind: "description",
-      claim: table.description!,
-    });
-  }
+  rows.push({
+    id: claimId(table.name, "grain"),
+    table: table.name,
+    role: "Grain",
+    source: table.qualified_name,
+    proposed: table.grain?.text ?? "Not established",
+    samples: [`${table.row_count.toLocaleString()} rows`],
+    findings: table.grain?.findings ?? [],
+    lineage: lineageFor(table, "grain", table.grain),
+    consequence: "critical",
+    claim: table.grain,
+    ...riskFor(table.grain, "critical"),
+  });
+
+  rows.push({
+    id: claimId(table.name, "semantics"),
+    table: table.name,
+    role: "Table meaning",
+    source: table.qualified_name,
+    proposed: table.description?.text ?? table.source_comment ?? "Not established",
+    samples: [`${table.columns.length} columns`, `${table.row_count.toLocaleString()} rows`],
+    findings: table.description?.findings ?? [],
+    lineage: lineageFor(table, "table meaning", table.description),
+    consequence: "high",
+    claim: table.description,
+    ...riskFor(table.description, "high"),
+  });
+
   for (const column of table.columns) {
-    if (!unsettled(column.description)) continue;
-    items.push({
-      id: columnClaimId(table.name, column.name),
-      table: table.name,
-      label: column.name,
-      kind: "column",
-      claim: column.description!,
-    });
+    rows.push(rowForColumn(table, column));
   }
-  return items;
+
+  return rows;
 }
 
-/**
- * Whether this claim still needs a person.
- *
- * Auto-accepted is settled: those are routine claims whose shape already said
- * everything, and putting them in front of a reviewer is what made the queue
- * feel endless when almost none of it was decidable.
- */
-function unsettled(claim: Claim | undefined): boolean {
-  return claim?.status === "unverified";
+function rowForColumn(table: TableOutput, column: ColumnOutput): ReviewRow {
+  const consequence = column.consequence;
+  return {
+    id: columnClaimId(table.name, column.name),
+    table: table.name,
+    role: column.name,
+    source: columnSummary(column),
+    proposed: column.description?.text ?? "No semantic meaning established",
+    dataType: column.data_type,
+    samples: samplesFor(column),
+    sampleNote: sampleNoteFor(column),
+    findings: column.description?.findings ?? [],
+    lineage: lineageFor(table, column.name, column.description, column.name),
+    consequence,
+    claim: column.description,
+    ...riskFor(column.description, consequence),
+  };
 }
 
-/** The settled claims for a table, newest decision first — shown as context. */
-export function settledOf(table: TableOutput): QueueItem[] {
-  const all: (QueueItem | null)[] = [
-    table.grain && !unsettled(table.grain)
-      ? {
-          id: claimId(table.name, "grain"),
-          table: table.name,
-          label: "grain",
-          kind: "grain" as const,
-          claim: table.grain,
-        }
-      : null,
-    table.description && !unsettled(table.description)
-      ? {
-          id: claimId(table.name, "semantics"),
-          table: table.name,
-          label: "table description",
-          kind: "description" as const,
-          claim: table.description,
-        }
-      : null,
-  ];
-  return all.filter((item): item is QueueItem => item !== null);
+function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<ReviewRow, "risk" | "reason"> {
+  const highImpact = consequence === "critical" || consequence === "high";
+
+  if (!claim) {
+    return highImpact
+      ? { risk: "yellow", reason: "important meaning is missing" }
+      : { risk: "none", reason: "routine field without established meaning" };
+  }
+
+  if (claim.status !== "unverified") {
+    return { risk: "none", reason: claim.status.replace("_", " ") };
+  }
+
+  if (claim.trust?.state === "contradicted") {
+    return { risk: "red", reason: "conflicting evidence" };
+  }
+
+  if (claim.confidence < 0.25) {
+    return highImpact
+      ? { risk: "red", reason: "important claim has very weak support" }
+      : { risk: "none", reason: "weak support, but routine impact" };
+  }
+
+  if (highImpact) {
+    return { risk: "yellow", reason: "important claim is not validated" };
+  }
+
+  return { risk: "none", reason: "routine claim can be left inferred" };
+}
+
+function matchesTable(entry: TableProgress, filter: Filter): boolean {
+  if (filter === "needs-review") return entry.highlighted > 0;
+  if (filter === "weak-trust") return entry.weakTrust > 0;
+  return true;
+}
+
+function matchesRow(row: ReviewRow, filter: Filter): boolean {
+  if (filter === "needs-review") return needsReview(row);
+  if (filter === "weak-trust") return (row.claim?.confidence ?? 1) < 0.5;
+  return true;
+}
+
+function byAttention(a: TableProgress, b: TableProgress): number {
+  return b.highlighted - a.highlighted || b.weakTrust - a.weakTrust || a.table.name.localeCompare(b.table.name);
+}
+
+function samplesFor(column: ColumnOutput): string[] {
+  const values = column.sample_values?.map((sample) => `${sample.value} (${sample.count})`) ?? [];
+  if (values.length > 0) return values.slice(0, 5);
+  const range = column.min_value !== undefined && column.max_value !== undefined
+    ? [`${column.min_value} → ${column.max_value}`]
+    : [];
+  return range;
+}
+
+function sampleNoteFor(column: ColumnOutput): string | undefined {
+  if (column.sample_values?.length) return undefined;
+  if (column.values_withheld_reason) {
+    return `${column.values_withheld_reason}. Re-extract with ATLAS_SAMPLE_POLICY=full to show raw samples.`;
+  }
+  if (column.sampled) return "Profiled from a sample of rows.";
+  return "No sample values in this snapshot.";
+}
+
+function lineageFor(
+  table: TableOutput,
+  role: string,
+  claim: Claim | undefined,
+  column?: string,
+): string[] {
+  const source = column ? `${table.qualified_name}.${column}` : table.qualified_name;
+  const lines = [`source: ${source}`];
+  if (claim?.evidence) lines.push(`evidence: ${claim.evidence}`);
+  if (claim?.trust) lines.push(`trust: ${claim.trust.state}, ${Math.round(claim.confidence * 100)}/100`);
+  if (claim) lines.push(`claim: ${claim.text}`);
+  lines.push(`output: semantic_view.yaml → ${table.name}.${role}`);
+  return lines;
+}
+
+function columnSummary(column: ColumnOutput): string {
+  const parts = [column.data_type];
+  if (column.is_primary_key) parts.push("pk");
+  if (!column.nullable) parts.push("not null");
+  if (column.null_fraction !== undefined) parts.push(`${Math.round(column.null_fraction * 100)}% null`);
+  if (column.distinct_count !== undefined) parts.push(`${column.distinct_count} distinct`);
+  return parts.join(" · ");
 }
