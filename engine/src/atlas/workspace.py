@@ -308,14 +308,16 @@ class Workspace:
             raise WorkspaceConflict(
                 f"cannot publish source {snapshot.source_id!r} into workspace bound to {manifest.source_id!r}"
             )
-        if (
-            manifest.snapshot_generation > 0
-            and self.has_semantic_state()
-            and not reset_semantics
-        ):
+        # Deliberately not conditioned on the current generation. Publishing out
+        # of generation zero is the case where semantic state is not carried but
+        # *abandoned*: the files stay at the workspace root while every accessor
+        # moves to `generations/1/`, so a reviewer's work disappears from the
+        # product while still occupying disk. Skipping the guard there protected
+        # the smaller loss and waved through the total one.
+        if self.has_semantic_state() and not reset_semantics:
             raise WorkspaceConflict(
-                "refresh would carry semantic state into a new snapshot generation; "
-                "reset_semantics must be explicit"
+                "refresh would discard semantic state that a new snapshot "
+                "generation cannot carry; reset_semantics must be explicit"
             )
         next_generation = manifest.snapshot_generation + 1
         staging = self.root / "generations" / f".{next_generation}.tmp"

@@ -14,7 +14,7 @@ from atlas.jobs import TERMINAL, Job, get_registry
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
 from atlas.sources import Source, SourceRegistry
-from atlas.workspace import Workspace, WorkspaceManifest
+from atlas.workspace import Workspace, WorkspaceConflict, WorkspaceManifest
 
 
 @pytest.fixture(autouse=True)
@@ -489,3 +489,52 @@ def test_second_workspace_mutation_is_rejected_while_first_is_active(client, mon
 
     gate.set()
     finish(first.json())
+
+
+def test_publishing_out_of_generation_zero_will_not_abandon_semantic_state(tmp_path) -> None:
+    """The guard must not be conditioned on the current generation.
+
+    Publishing out of generation zero is the case where semantic state is not
+    carried into the new generation but abandoned: the files stay at the
+    workspace root while every accessor moves to `generations/1/`. Skipping the
+    check there protected the smaller loss and waved through the total one.
+    """
+    workspace = Workspace("gen-zero", tmp_path)
+    workspace.create_manifest("pg")
+    FactStore(
+        facts=[
+            Fact(
+                subject="orders",
+                aspect="grain",
+                claim="One row per order.",
+                confidence=0.5,
+                provenance=[
+                    Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")
+                ],
+            )
+        ]
+    ).write(workspace.facts_path)
+    assert workspace.has_semantic_state()
+
+    snapshot = Snapshot(
+        database="shop",
+        schema_name="public",
+        dialect="postgresql",
+        tables=[
+            Table(
+                schema_name="public",
+                name="orders",
+                columns=[Column(name="id", data_type="INT", nullable=False)],
+            )
+        ],
+    )
+
+    with pytest.raises(WorkspaceConflict, match="reset_semantics"):
+        workspace.publish_snapshot(snapshot)
+
+    # Refused, so nothing moved and the claims are still reachable.
+    assert workspace.read_manifest().snapshot_generation == 0
+    assert workspace.facts_path.exists()
+
+    published = workspace.publish_snapshot(snapshot, reset_semantics=True)
+    assert published.snapshot_generation == 1
