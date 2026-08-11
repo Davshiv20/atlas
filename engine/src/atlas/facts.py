@@ -28,6 +28,7 @@ import yaml
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from atlas.classify import Consequence
+from atlas.endorsement import EndorsementAssessment
 from atlas.policy import TrustAssessment
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,9 @@ class Fact(BaseModel):
     # Optional only so existing YAML written before trust-factor breakdowns can
     # still load. Every newly evaluated claim carries the full assessment.
     trust: TrustAssessment | None = None
+    # Where the claim stands with a human. Derived beside `trust` from the
+    # same evidence, so the two cannot disagree — see APPROVAL.md.
+    endorsement: EndorsementAssessment | None = None
     provenance: list[Provenance] = Field(min_length=1)
     status: FactStatus = FactStatus.UNVERIFIED
     verified_by: str | None = None

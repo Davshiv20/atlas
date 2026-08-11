@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Literal, Self
 
 from fastapi import Body, Depends, FastAPI, HTTPException
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from sqlalchemy import URL
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -26,6 +26,7 @@ from starlette.types import Scope
 from atlas.adapters.base import UnsupportedDatabase
 from atlas.adapters.registry import create_adapter
 from atlas.answers import record_answer
+from atlas.decisions import record_decision
 from atlas.facts import Consequence, Fact, FactStatus, FactStore
 from atlas.jobs import ActiveWorkspaceJob, Job, JobProgress, ProgressReporter, get_registry
 from atlas.output import assess_facts, build_output
@@ -1014,11 +1015,19 @@ def review_claim(
     request: ReviewRequest,
     _guard: None = Depends(_workspace_write_guard),
 ) -> Fact:
-    """Record a human verdict.
+    """Record a human verdict, as evidence.
 
-    Verifying an ungrounded claim is refused: the model invariant forbids it,
-    and surfacing that as a 409 is the point — it is the rule that stops a
-    confident guess from being promoted to fact by a distracted reviewer.
+    A decision is written to the evidence store and linked to the claim; where
+    the claim now stands is derived from that record, never stored on it. See
+    `APPROVAL.md`.
+
+    This no longer refuses an ungrounded claim. The 409 it used to raise existed
+    because `enforce_grounding_rules` forbids `verified` without an executed
+    check — but a human decision *is* grounding (`Fact.is_grounded` accepts
+    `ProvenanceKind.HUMAN`), so the condition is not reachable. What the refusal
+    protected against is preserved instead by keeping the states apart: a claim a
+    check established reads as `verified`, a claim only a person asserted reads
+    as `authoritative`, and the emitted view says which.
     """
     workspace = _existing(name)
     store = workspace.read_facts()
@@ -1026,22 +1035,16 @@ def review_claim(
     if existing is None:
         raise HTTPException(status_code=404, detail=f"no claim {claim_id!r}")
 
-    payload = existing.model_dump()
-    payload.update(status=request.decision, verified_by=request.reviewer)
-    if request.claim is not None:
-        payload["claim"] = request.claim
+    evidence = workspace.read_evidence()
+    updated, evidence = record_decision(
+        existing,
+        evidence,
+        reviewer=request.reviewer,
+        decision=request.decision,
+        text=request.claim,
+    )
 
-    try:
-        updated = Fact.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "this claim has no executed check behind it, so it cannot be marked verified. "
-                "Ground it first, or reject it."
-            ),
-        ) from exc
-
+    evidence.write(workspace.evidence_path)
     FactStore(facts=[f for f in store.facts if f.id != claim_id] + [updated]).write(
         workspace.facts_path
     )

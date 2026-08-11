@@ -3,10 +3,11 @@ import { useMemo, useState } from "react";
 import type { ClaimStatus, SchemaOutput, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
-import { Key } from "@/components/ui/Button";
+import { Button, Key } from "@/components/ui/Button";
 import {
   buildQueue,
   countFor,
+  isGap,
   needsReview,
   rowsFor,
   type Filter,
@@ -142,6 +143,12 @@ function Ledger({
           <Chip active={filter === "weak-trust"} onClick={() => onFilter("weak-trust")}>
             Weak trust {countFor(output, "weak-trust")}
           </Chip>
+          {/* Separate from "needs review" on purpose: these are fields the
+              engine never wrote about. Grouping them with review work is what
+              made an approved workspace still look unfinished. */}
+          <Chip active={filter === "not-generated"} onClick={() => onFilter("not-generated")}>
+            Not generated {countFor(output, "not-generated")}
+          </Chip>
           <Chip active={filter === "all"} onClick={() => onFilter("all")}>
             All
           </Chip>
@@ -198,11 +205,24 @@ function Section({
             >
               <span className="ident min-w-0 flex-1 truncate text-ink">{entry.table.name}</span>
               {entry.highlighted > 0 && (
-                <span className="rounded-full bg-amber-soft px-1.5 text-badge font-semibold text-amber-strong">
+                <span
+                  title={`${entry.highlighted} awaiting your decision`}
+                  className="rounded-full bg-amber-soft px-1.5 text-badge font-semibold tabular-nums text-amber-strong"
+                >
                   {entry.highlighted}
                 </span>
               )}
-              <span className="shrink-0 text-meta tabular-nums text-ink-3">
+              {/* Outlined, not filled: a gap is an absence, and giving it the
+                  same solid chip as review work makes the two read alike. */}
+              {entry.gaps > 0 && (
+                <span
+                  title={`${entry.gaps} fields with no generated claim`}
+                  className="rounded-full border border-dashed border-line-strong px-1.5 text-badge font-semibold tabular-nums text-ink-3"
+                >
+                  {entry.gaps}
+                </span>
+              )}
+              <span className="shrink-0 text-meta tabular-nums text-ink-4">
                 {entry.totalRows}
               </span>
             </button>
@@ -221,37 +241,71 @@ function ReviewSheet({
   workspace: string;
 }) {
   const rows = rowsFor(table, "all");
-  const highlighted = rows.filter(needsReview).length;
+  const open = rows.filter(needsReview).length;
+  const gaps = rows.filter(isGap).length;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-      <header className="mb-3 rounded-[--radius-panel] border border-line bg-surface px-4 py-3">
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="ident text-table text-ink">{table.qualified_name}</h2>
-          <span className="text-body text-ink-3">
-            {table.row_count.toLocaleString()} rows · {highlighted} highlighted
-          </span>
-        </div>
-        <p className="mt-1 text-body text-ink-3">
-          Yellow means “worth a human look.” Red means conflicting or very weak support on an important claim.
-          Routine rows can stay as-is.
-        </p>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* The count line is the whole summary. The old header spent three lines
+          of prose explaining what the colours meant, which is what a legend is
+          for — and needing one at all was the signal that the marks were not
+          carrying their own meaning. */}
+      <header className="sticky top-0 z-20 flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line bg-canvas/95 px-6 py-3 backdrop-blur">
+        <h2 className="ident text-table text-ink">{table.qualified_name}</h2>
+        <span className="text-meta tabular-nums text-ink-3">
+          {table.row_count.toLocaleString()} rows · {rows.length} fields
+        </span>
+        <span className="ml-auto flex items-center gap-3">
+          <Tally n={open} tone="review" label={open === 1 ? "to decide" : "to decide"} />
+          <Tally n={gaps} tone="gap" label="not generated" />
+        </span>
       </header>
 
-      <div className="overflow-x-auto rounded-[--radius-panel] border border-line bg-surface">
-        <div className="grid min-w-[1060px] grid-cols-[150px_minmax(190px,1fr)_minmax(170px,.8fr)_70px_115px_125px] gap-3 border-b border-line bg-raised px-3 py-2 text-meta font-semibold uppercase tracking-wide text-ink-3">
-          <span>Field</span>
-          <span>Suggested meaning</span>
-          <span>Sample values</span>
-          <span>Trust</span>
-          <span>Review</span>
-          <span>Action</span>
+      <div className="overflow-x-auto">
+        <div className="min-w-[880px]">
+          <div className={`${SHEET_GRID} sticky top-[49px] z-10 border-b border-line bg-surface py-2 pl-4 pr-6 text-meta font-semibold uppercase tracking-wide text-ink-4`}>
+            <span>Field</span>
+            <span>Suggested meaning</span>
+            <span>Samples</span>
+            <span>State</span>
+            <span className="text-right">Action</span>
+          </div>
+          {rows.map((row) => (
+            <ReviewRow key={row.id} row={row} workspace={workspace} />
+          ))}
         </div>
-        {rows.map((row) => (
-          <ReviewRow key={row.id} row={row} workspace={workspace} />
-        ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Five columns, down from six.
+ *
+ * Trust and Review were separate cells saying one thing between them, and the
+ * six-column minimum forced the sheet to 1060px — which, beside a 268px ledger,
+ * scrolled sideways on any ordinary laptop. A review table you have to drag
+ * horizontally is not a table you read.
+ */
+const SHEET_GRID =
+  "grid grid-cols-[minmax(140px,170px)_minmax(220px,1fr)_minmax(150px,0.62fr)_128px_112px] items-start gap-x-4";
+
+/** A count that disappears at zero, so "nothing outstanding" looks like nothing. */
+function Tally({ n, tone, label }: { n: number; tone: "review" | "gap"; label: string }) {
+  if (n === 0) return null;
+  return (
+    <span className="flex items-baseline gap-1.5 text-meta">
+      <span
+        aria-hidden
+        className={
+          tone === "review"
+            ? "inline-block h-2 w-[3px] rounded-full bg-amber"
+            : "inline-block h-2 w-[3px] rounded-full bg-line-strong"
+        }
+      />
+      <span className="font-semibold tabular-nums text-ink-2">{n}</span>
+      <span className="text-ink-3">{label}</span>
+    </span>
   );
 }
 
@@ -274,15 +328,25 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
     setEditing(false);
   };
 
-  const rowTone = row.risk === "red"
-    ? "bg-red-soft/70"
-    : row.risk === "yellow"
-      ? "bg-amber-soft/70"
-      : "bg-surface";
+  // Risk is carried by a 3px edge marker, not by flooding the row. Washing the
+  // whole row meant a table with twenty flagged fields rendered as a solid
+  // amber panel: the colour stopped locating anything because it was
+  // everywhere, and the sheet became unreadable at exactly the moment there
+  // was most to read.
+  const marker =
+    row.risk === "red"
+      ? "before:bg-red"
+      : row.risk === "yellow"
+        ? "before:bg-amber"
+        : row.risk === "ungenerated"
+          ? "before:bg-line-strong"
+          : "before:bg-transparent";
 
   return (
-    <article className={`border-b border-line last:border-b-0 ${rowTone}`}>
-      <div className="grid min-w-[1060px] grid-cols-[150px_minmax(190px,1fr)_minmax(170px,.8fr)_70px_115px_125px] gap-3 px-3 py-2">
+    <article
+      className={`group relative border-b border-line/70 bg-canvas last:border-b-0 hover:bg-surface/60 before:absolute before:inset-y-0 before:left-0 before:w-[3px] ${marker}`}
+    >
+      <div className={`${SHEET_GRID} py-2.5 pl-4 pr-6`}>
         <div className="min-w-0">
           <p className="ident truncate text-ink">{row.role}</p>
           <p className="truncate text-meta text-ink-3">{row.source}</p>
@@ -331,77 +395,82 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
           {row.sampleNote && <p className="mt-1 text-meta text-ink-3">{row.sampleNote}</p>}
         </div>
 
-        <div>
-          {claim ? (
-            <span className="rounded-full bg-raised px-1.5 text-badge font-semibold tabular-nums text-ink-2">
-              {trustPercent(claim.confidence)}
-            </span>
-          ) : (
-            <span className="text-meta text-ink-3">—</span>
+        {/* One cell, not two. Trust and Review were adjacent columns describing
+            a single state, and the risk chip printed the internal enum — a
+            reviewer read the literal word "yellow", which names a colour rather
+            than a condition and is meaningless to anyone who cannot see it. */}
+        <div className="min-w-0">
+          <StateMark row={row} />
+          {claim && (
+            <p className="mt-1 text-meta tabular-nums text-ink-3">
+              {trustPercent(claim.confidence)} trust
+            </p>
           )}
+          <p className="mt-0.5 text-meta leading-[15px] text-ink-4">{row.reason}</p>
         </div>
 
-        <div>
-          <span
-            className={`rounded-full px-1.5 text-badge font-semibold ${
-              row.risk === "red"
-                ? "bg-red-soft text-red"
-                : row.risk === "yellow"
-                  ? "bg-amber-soft text-amber-strong"
-                  : "bg-teal-soft text-teal-strong"
-            }`}
-          >
-            {row.risk === "none" ? "quiet" : row.risk}
-          </span>
-          <p className="mt-1 text-meta text-ink-3">{row.reason}</p>
-        </div>
-
-        <div className="flex flex-wrap items-start gap-1.5">
+        {/* Three buttons on every row put up to 120 controls on one screen. The
+            decision stays visible; the two that revise it appear when the row
+            is hovered or focused. They stay in the DOM and in the tab order —
+            focus-within is what keeps this usable from the keyboard. */}
+        <div className="flex flex-col items-end gap-1">
           {editing ? (
             <>
-              <button
-                type="button"
+              <Button
+                size="sm"
+                variant="primary"
                 disabled={isLoading || !draft.trim()}
                 onClick={() => void submit("verified", draft.trim())}
-                className={ACTION_PRIMARY}
               >
                 Save
-              </button>
-              <button type="button" onClick={() => setEditing(false)} className={ACTION_SECONDARY}>
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
                 Cancel
-              </button>
+              </Button>
             </>
           ) : claim ? (
             <>
-              <button
-                type="button"
-                disabled={isLoading || !canApprove}
-                title={canApprove ? undefined : "Ground it before marking verified"}
-                onClick={() => void submit("verified")}
-                className={ACTION_PRIMARY}
-              >
-                Confirm
-              </button>
-              <button type="button" onClick={() => setEditing(true)} className={ACTION_SECONDARY}>
-                Edit
-              </button>
-              <button
-                type="button"
-                disabled={isLoading}
-                onClick={() => void submit("rejected")}
-                className="rounded-[--radius-control] px-2 py-1 text-meta text-red hover:bg-red-soft"
-              >
-                Reject
-              </button>
+              {needsReview(row) ? (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={isLoading || !canApprove}
+                  title={canApprove ? undefined : "Nothing has tested this claim yet"}
+                  onClick={() => void submit("verified")}
+                >
+                  Confirm
+                </Button>
+              ) : null}
+              <span className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={isLoading}
+                  onClick={() => void submit("rejected")}
+                >
+                  Reject
+                </Button>
+              </span>
             </>
           ) : (
-            <span className="text-meta text-ink-3">No claim</span>
+            // Deliberately not a disabled button. There is no action to offer —
+            // the gap closes by regenerating the table, not by deciding here.
+            <span className="text-right text-meta leading-[15px] text-ink-4">
+              Regenerate<br />to fill
+            </span>
           )}
         </div>
       </div>
 
-      <details className="min-w-[1060px] border-t border-line/70 px-3 py-1.5">
-        <summary className="cursor-pointer text-meta font-semibold uppercase tracking-wide text-ink-3">
+      {/* Only where there is something to disclose. Rendering it on every row
+          put a triangle and an uppercase label beside forty fields, most of
+          which had nothing behind them. */}
+      {(row.findings.length > 0 || row.lineage.length > 0) && (
+      <details className="border-t border-line/50 pb-1.5 pl-4 pr-6">
+        <summary className="cursor-pointer py-1 text-meta text-ink-4 transition-colors hover:text-ink-2">
           Why Atlas thinks this
         </summary>
         {row.findings.length > 0 && (
@@ -419,7 +488,48 @@ function ReviewRow({ row, workspace }: { row: ReviewLine; workspace: string }) {
           ))}
         </ol>
       </details>
+      )}
     </article>
+  );
+}
+
+/**
+ * What this row's state is, in words a reviewer can act on.
+ *
+ * A settled claim says so plainly rather than being decorated: the reward for
+ * finishing a row should be that it goes quiet. Only the two states that want
+ * something carry a filled chip.
+ */
+function StateMark({ row }: { row: ReviewLine }) {
+  if (row.risk === "red") {
+    return (
+      <span className="inline-flex rounded-full bg-red-soft px-1.5 py-[1px] text-badge font-semibold text-red">
+        Conflict
+      </span>
+    );
+  }
+  if (row.risk === "yellow") {
+    return (
+      <span className="inline-flex rounded-full bg-amber-soft px-1.5 py-[1px] text-badge font-semibold text-amber-strong">
+        Needs you
+      </span>
+    );
+  }
+  // Dashed and unfilled — the shape says "nothing is here", which is the
+  // literal truth and the thing that was indistinguishable from review work.
+  if (row.risk === "ungenerated") {
+    return (
+      <span className="inline-flex rounded-full border border-dashed border-line-strong px-1.5 py-[1px] text-badge font-semibold text-ink-3">
+        Not generated
+      </span>
+    );
+  }
+  const settled = row.claim?.status;
+  return (
+    <span className="inline-flex items-center gap-1.5 text-badge font-semibold text-ink-3">
+      <span aria-hidden className="inline-block size-[5px] rounded-full bg-teal" />
+      {settled === "verified" ? "Confirmed" : settled === "auto_accepted" ? "Accepted" : "Settled"}
+    </span>
   );
 }
 
@@ -500,10 +610,3 @@ function Chip({
     </button>
   );
 }
-
-
-const ACTION_PRIMARY =
-  "rounded-[--radius-control] bg-cta px-2 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4";
-
-const ACTION_SECONDARY =
-  "rounded-[--radius-control] border border-line bg-surface px-2 py-1 text-meta text-ink hover:bg-raised";

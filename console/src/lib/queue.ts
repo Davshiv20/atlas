@@ -8,8 +8,19 @@ import { claimId, columnClaimId } from "@/lib/review";
  * a stack of cards. Every table row is visible; only risky rows are highlighted.
  */
 
-export type Filter = "needs-review" | "weak-trust" | "all";
-export type Risk = "red" | "yellow" | "none";
+export type Filter = "needs-review" | "weak-trust" | "not-generated" | "all";
+
+/**
+ * What a row is asking of the reader.
+ *
+ * `ungenerated` is not a degree of risk — it is the absence of a claim, and it
+ * is kept apart from `yellow` for a reason. Both used to render as "important
+ * meaning is missing" on an amber row, so a field the engine never wrote about
+ * was indistinguishable from one awaiting approval. A reviewer who had approved
+ * everything still saw a screen of amber and concluded their approvals had not
+ * saved. A gap is closed by regenerating the table, never by a decision here.
+ */
+export type Risk = "red" | "yellow" | "ungenerated" | "none";
 
 export interface QueueItem {
   id: string;
@@ -39,6 +50,9 @@ export interface ReviewRow {
 export interface TableProgress {
   table: TableOutput;
   highlighted: number;
+  /** Fields the engine never made a claim about. Counted apart from
+   *  `highlighted` so an empty review queue reads as empty. */
+  gaps: number;
   weakTrust: number;
   totalRows: number;
 }
@@ -72,8 +86,14 @@ export function rowsFor(table: TableOutput, filter: Filter = "all"): ReviewRow[]
   return allRows(table).filter((row) => matchesRow(row, filter));
 }
 
+/** A row asking for a decision. A gap asks for a regeneration, so it is not one. */
 export function needsReview(row: ReviewRow): boolean {
-  return row.risk !== "none";
+  return row.risk === "red" || row.risk === "yellow";
+}
+
+/** A field the engine never made a claim about. Visible, but not a task. */
+export function isGap(row: ReviewRow): boolean {
+  return row.risk === "ungenerated";
 }
 
 function toProgress(table: TableOutput): TableProgress {
@@ -81,6 +101,7 @@ function toProgress(table: TableOutput): TableProgress {
   return {
     table,
     highlighted: rows.filter(needsReview).length,
+    gaps: rows.filter(isGap).length,
     weakTrust: rows.filter((row) => (row.claim?.confidence ?? 1) < 0.5).length,
     totalRows: rows.length,
   };
@@ -154,8 +175,8 @@ function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<Revie
 
   if (!claim) {
     return highImpact
-      ? { risk: "yellow", reason: "important meaning is missing" }
-      : { risk: "none", reason: "routine field without established meaning" };
+      ? { risk: "ungenerated", reason: "no claim was generated — regenerate the table" }
+      : { risk: "none", reason: "routine field, no claim generated" };
   }
 
   if (claim.status !== "unverified") {
@@ -182,12 +203,14 @@ function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<Revie
 function matchesTable(entry: TableProgress, filter: Filter): boolean {
   if (filter === "needs-review") return entry.highlighted > 0;
   if (filter === "weak-trust") return entry.weakTrust > 0;
+  if (filter === "not-generated") return entry.gaps > 0;
   return true;
 }
 
 function matchesRow(row: ReviewRow, filter: Filter): boolean {
   if (filter === "needs-review") return needsReview(row);
   if (filter === "weak-trust") return (row.claim?.confidence ?? 1) < 0.5;
+  if (filter === "not-generated") return isGap(row);
   return true;
 }
 
