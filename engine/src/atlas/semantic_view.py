@@ -96,10 +96,19 @@ class SemanticView(BaseModel):
 
 
 def build_semantic_view(output: SchemaOutput) -> SemanticView:
+    """Every captured table, analysed or not.
+
+    Omitting the unanalysed ones hid their existence: an agent reading the view
+    could not tell the difference between a table Atlas has nothing to say about
+    and a table that is not in the database. The first is a gap it should route
+    around; the second is a fact about the schema. Emitting the shape with the
+    meaning explicitly unestablished says which — `ready` stays false because
+    grain is still missing, so nothing here can be mistaken for settled.
+    """
     return SemanticView(
         database=output.database,
         schema_name=output.schema_name,
-        tables=[_table(table) for table in output.tables if table.analyzed],
+        tables=[_table(table) for table in output.tables],
     )
 
 

@@ -152,9 +152,30 @@ def test_a_relationship_says_whether_the_database_enforces_it() -> None:
     assert rendered.count("# verified by check, not enforced") == 1
 
 
-def test_a_table_nobody_analysed_is_not_in_the_view() -> None:
+def test_a_table_nobody_analysed_appears_but_establishes_nothing() -> None:
+    """It used to be omitted. That hid the table's existence.
+
+    An agent reading the view could not distinguish a table Atlas has nothing
+    to say about from a table that is not in the database. The first is a gap to
+    route around; the second is a fact about the schema, and silently conflating
+    them is the opposite of keeping unknown meaning explicit.
+
+    The cost is real — a column list with no meanings is close to the schema an
+    agent could already read — so the entry must never look settled. `ready`
+    stays false while grain is missing, and no meaning is invented.
+    """
     view = view_of(table(analyzed=False, columns=[column("name")]))
-    assert view.tables == []
+
+    assert [entry.name for entry in view.tables] == ["clients"]
+    entry = view.tables[0]
+    assert entry.grain is None, "no grain was established, and none may be implied"
+    assert entry.description is None
+    assert entry.dimensions == [], "a column with no meaning is not a dimension"
+    # The column is named and its absence of meaning is stated, rather than the
+    # column being silently dropped.
+    assert [(x.name, x.reason) for x in entry.excluded] == [
+        ("name", "no established meaning yet")
+    ]
 
 
 def test_a_dimension_carries_the_description_it_was_given() -> None:

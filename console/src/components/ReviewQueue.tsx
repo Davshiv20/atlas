@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { ClaimStatus, SchemaOutput, TrustFactors } from "@/api/types";
 import { describeError } from "@/api/errors";
+import { ReviewDiff } from "@/components/ReviewDiff";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
 import { Button, Key } from "@/components/ui/Button";
 import {
@@ -65,10 +66,12 @@ export function ReviewQueue({
           </span>
           <span className="text-body text-ink-2">
             {table ? (
-              <>
-                Scan the sheet. Touch only highlighted rows.
-                <span className="ident ml-2 text-ink">{table.name}</span>
-              </>
+              <span className="text-ink-3">
+                <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
+                <kbd className="font-mono">a</kbd> endorse ·{" "}
+                <kbd className="font-mono">e</kbd> edit ·{" "}
+                <kbd className="font-mono">r</kbd> dispute
+              </span>
             ) : analysed === 0 ? (
               "not analysed yet"
             ) : (
@@ -89,7 +92,11 @@ export function ReviewQueue({
             bordered={false}
           />
         ) : table ? (
-          <ReviewSheet table={table} workspace={workspace} />
+          <ReviewDiff
+            table={table}
+            workspace={workspace}
+            analysed={table.analyzed}
+          />
         ) : analysed === 0 ? (
           /* Not the same as an empty queue, and it must not be dressed as one.
              A green "nothing to review" over a schema nobody has looked at
@@ -155,6 +162,10 @@ function Ledger({
           </span>
         </div>
 
+        {/* The filters narrow review work. With nothing analysed they all
+            read zero and none of them can change that, so they are four
+            dead controls above an inventory list. */}
+        {output.tables.some((table) => table.analyzed) && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Chip active={filter === "needs-review"} onClick={() => onFilter("needs-review")}>
             Needs review {countFor(output, "needs-review")}
@@ -172,6 +183,7 @@ function Ledger({
             All
           </Chip>
         </div>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto py-2">
