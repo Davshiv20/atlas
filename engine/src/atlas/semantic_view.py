@@ -25,11 +25,12 @@ import yaml
 from pydantic import BaseModel, Field
 
 from atlas.facts import FactStatus
-from atlas.output import ColumnOutput, SchemaOutput, TableOutput
+from atlas.output import ColumnOutput, SampleValue, SchemaOutput, TableOutput
 
 # Below this share of non-null values a column carries nothing an agent can
 # use. Named because it is a judgement, not a fact about databases.
 EMPTY_COLUMN_THRESHOLD = 0.999
+MAX_SAMPLE_VALUES = 5
 
 
 class Dimension(BaseModel):
@@ -39,6 +40,8 @@ class Dimension(BaseModel):
     description: str | None = None
     unique: bool = False
     nullable: bool = True
+    sample_values: list[SampleValue] = Field(default_factory=list)
+    samples_withheld: str | None = None
     #: False while the description is still the model's own.
     reviewed: bool = False
     reviewed_by: str | None = None
@@ -60,6 +63,8 @@ class Excluded(BaseModel):
 
     name: str
     reason: str
+    sample_values: list[SampleValue] = Field(default_factory=list)
+    samples_withheld: str | None = None
 
 
 class TableView(BaseModel):
@@ -119,7 +124,14 @@ def _table(table: TableOutput) -> TableView:
     for column in table.columns:
         reason = _why_excluded(table, column)
         if reason:
-            excluded.append(Excluded(name=column.name, reason=reason))
+            excluded.append(
+                Excluded(
+                    name=column.name,
+                    reason=reason,
+                    sample_values=list(column.sample_values or [])[:MAX_SAMPLE_VALUES],
+                    samples_withheld=column.values_withheld_reason,
+                )
+            )
             continue
         dimensions.append(_dimension(table, column))
 
@@ -160,6 +172,8 @@ def _dimension(table: TableOutput, column: ColumnOutput) -> Dimension:
             or (column.distinct_count is not None and column.distinct_count == table.row_count)
         ),
         nullable=column.nullable,
+        sample_values=list(column.sample_values or [])[:MAX_SAMPLE_VALUES],
+        samples_withheld=column.values_withheld_reason,
         reviewed=bool(claim and claim.status is FactStatus.VERIFIED),
         reviewed_by=None,
     )
@@ -262,6 +276,7 @@ def _render_table(table: TableView) -> list[str]:
             # list without it hands an agent the schema it already had.
             if dimension.description:
                 lines.extend(_field("        ", "description", dimension.description))
+            lines.extend(_render_samples("        ", dimension.sample_values, dimension.samples_withheld))
             if not dimension.reviewed:
                 lines.append("        # pending review")
 
@@ -276,10 +291,34 @@ def _render_table(table: TableView) -> list[str]:
 
     if table.excluded:
         lines.append("    excluded:")
-        width = max(len(e.name) for e in table.excluded)
         for entry in table.excluded:
-            lines.append(f"      - {entry.name:<{width}}  # {entry.reason}")
+            lines.append(f"      - name: {entry.name}")
+            lines.extend(_field("        ", "reason", entry.reason))
+            lines.extend(_render_samples("        ", entry.sample_values, entry.samples_withheld))
 
+    return lines
+
+
+def _render_samples(
+    indent: str, samples: list[SampleValue], withheld: str | None
+) -> list[str]:
+    """Emit sample state for every column without bypassing privacy policy."""
+    if withheld:
+        return _field(indent, "samples_withheld", withheld)
+    if not samples:
+        return [f"{indent}sample_values: []"]
+
+    lines = [f"{indent}sample_values:"]
+    for sample in samples:
+        dumped = yaml.safe_dump(
+            {"value": sample.value, "count": sample.count},
+            width=68,
+            allow_unicode=True,
+            default_flow_style=True,
+            sort_keys=False,
+        ).rstrip("\n").splitlines()
+        lines.append(f"{indent}  - {dumped[0]}")
+        lines.extend(f"{indent}    {line}" for line in dumped[1:])
     return lines
 
 

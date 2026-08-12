@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from atlas.classify import Consequence
 from atlas.facts import FactStatus
-from atlas.output import Claim, ColumnOutput, JoinOutput, SchemaOutput, TableOutput
+from atlas.output import Claim, ColumnOutput, JoinOutput, SampleValue, SchemaOutput, TableOutput
 from atlas.semantic_view import build_semantic_view, render_yaml
 
 
@@ -201,6 +201,56 @@ def test_a_dimension_carries_the_description_it_was_given() -> None:
     assert view.tables[0].dimensions[0].description == "Commercial tier; drives billing rate."
     assert dimension["description"] == "Commercial tier; drives billing rate."
     assert dimension["nullable"] is False
+
+
+def test_every_column_emits_sample_values_or_a_withholding_reason() -> None:
+    import yaml
+
+    view = view_of(
+        table(
+            grain=claim("one row per client"),
+            columns=[
+                column(
+                    "tier",
+                    description=claim("Commercial tier."),
+                    sample_values=[
+                        SampleValue(value=value, count=12 - index)
+                        for index, value in enumerate(
+                            ["enterprise", "growth", "starter", "partner", "internal", "legacy"]
+                        )
+                    ],
+                ),
+                column(
+                    "email",
+                    description=claim("Contact email."),
+                    values_withheld_reason="column name matches sensitive-data pattern",
+                ),
+                column(
+                    "long_code",
+                    description=claim("A deliberately long code."),
+                    sample_values=[SampleValue(value="CODE-" + "x" * 120, count=1)],
+                ),
+                column("mystery"),
+            ],
+        )
+    )
+
+    parsed = yaml.safe_load(render_yaml(view))["tables"][0]
+    tier = next(item for item in parsed["dimensions"] if item["name"] == "tier")
+    email = next(item for item in parsed["dimensions"] if item["name"] == "email")
+    long_code = next(item for item in parsed["dimensions"] if item["name"] == "long_code")
+    mystery = next(item for item in parsed["excluded"] if item["name"] == "mystery")
+
+    assert tier["sample_values"] == [
+        {"value": "enterprise", "count": 12},
+        {"value": "growth", "count": 11},
+        {"value": "starter", "count": 10},
+        {"value": "partner", "count": 9},
+        {"value": "internal", "count": 8},
+    ]
+    assert email["samples_withheld"] == "column name matches sensitive-data pattern"
+    assert long_code["sample_values"] == [{"value": "CODE-" + "x" * 120, "count": 1}]
+    assert mystery["sample_values"] == []
 
 
 def test_the_emitted_document_is_valid_yaml() -> None:
