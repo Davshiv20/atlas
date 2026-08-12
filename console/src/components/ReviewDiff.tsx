@@ -67,6 +67,7 @@ export function ReviewDiff({
   const [draft, setDraft] = useState("");
   const [failure, setFailure] = useState<string | null>(null);
   const cursorRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(() => rowsFor(table, "all"), [table]);
   // Only rows a person can actually decide. A field with no claim is a gap; it
@@ -81,8 +82,28 @@ export function ReviewDiff({
     setFailure(null);
   }, [table.name]);
 
+  // Deliberately not `scrollIntoView`. That scrolls every scrollable ancestor
+  // on both axes — and an `overflow: hidden` ancestor is still programmatically
+  // scrollable — so a focused row even slightly wider than its container made
+  // the browser shift the whole application sideways to reveal it. The sidebar
+  // and the title slid off the left edge of the window.
+  //
+  // This moves one element's scrollTop and can do nothing else.
   useEffect(() => {
-    cursorRef.current?.scrollIntoView({ block: "nearest" });
+    const scroller = scrollerRef.current;
+    const focused = cursorRef.current;
+    if (!scroller || !focused) return;
+
+    const view = scroller.getBoundingClientRect();
+    const row = focused.getBoundingClientRect();
+    // Clears the sticky file header when scrolling back up.
+    const margin = 72;
+
+    if (row.top < view.top + margin) {
+      scroller.scrollTop -= view.top + margin - row.top;
+    } else if (row.bottom > view.bottom) {
+      scroller.scrollTop += row.bottom - view.bottom + 12;
+    }
   }, [cursor]);
 
   const stage = useCallback(
@@ -170,7 +191,7 @@ export function ReviewDiff({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <div ref={scrollerRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         {/* The file header. Grain and table meaning describe the file itself,
             not a line in it, so they stay pinned while the columns scroll. */}
         <header className="sticky top-0 z-10 border-b border-line bg-canvas/95 px-6 py-3 backdrop-blur">
