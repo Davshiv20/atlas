@@ -53,11 +53,14 @@ export function ReviewDiff({
   table,
   workspace,
   analysed,
+  analysing,
 }: {
   table: TableOutput;
   workspace: string;
   /** False when nothing in this table has been analysed. */
   analysed: boolean;
+  /** A run is in flight, so an absent claim may simply not exist yet. */
+  analysing: boolean;
 }) {
   const reviewer = useAppSelector((state) => state.ui.reviewer);
   const [review, { isLoading: submitting }] = useReviewMutation();
@@ -238,6 +241,7 @@ export function ReviewDiff({
               }}
               onCancelEdit={() => setEditing(null)}
               analysed={analysed}
+              analysing={analysing}
               position={index}
             />
           ))}
@@ -282,6 +286,7 @@ function Hunk({
   onEdit,
   onCancelEdit,
   analysed,
+  analysing,
   position,
 }: {
   row: ReviewRow;
@@ -296,6 +301,7 @@ function Hunk({
   onEdit: () => void;
   onCancelEdit: () => void;
   analysed: boolean;
+  analysing: boolean;
   position: number;
 }) {
   const mark = markFor(row, staged);
@@ -375,7 +381,7 @@ function Hunk({
             >
               {decidable ? "+" : "░"}
             </span>
-            {staged?.text ?? (decidable ? row.claim!.text : messageFor(row, analysed))}
+            {staged?.text ?? (decidable ? row.claim!.text : messageFor(row, analysed, analysing))}
           </p>
         )}
 
@@ -428,8 +434,17 @@ function Hunk({
  * the answer is to run the analysis, and telling a reviewer to regenerate
  * something that was never generated sends them nowhere.
  */
-function messageFor(row: ReviewRow, analysed: boolean): string {
+function messageFor(row: ReviewRow, analysed: boolean, analysing: boolean): string {
+  if (analysing) return "analysis is running — this field has not been reached yet";
   if (!analysed) return "no meaning proposed yet — run Generate semantic view";
   if (needsReview(row)) return row.reason;
-  return "the engine proposed nothing here — regenerating this table would retry it";
+  // The distinction that matters. A routine column has no claim because Atlas
+  // decided not to make one — its shape already fixes its meaning, and
+  // suppressing it is the single largest reduction in review load. A
+  // consequential column with no claim is the opposite: the analysis was meant
+  // to produce one and did not, and that is worth chasing.
+  if (row.consequence === "routine") {
+    return "routine — its shape already fixes its meaning, so no claim is made";
+  }
+  return `${row.consequence} field the analysis proposed nothing for — regenerate to retry`;
 }

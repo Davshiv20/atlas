@@ -137,7 +137,11 @@ export default function App() {
       ) : view === "map" ? (
         <SchemaMap output={output} workspace={workspace} />
       ) : (
-        <ReviewQueue output={output} workspace={workspace} />
+        <ReviewQueue
+          output={output}
+          workspace={workspace}
+          analysing={runningWorkspace === workspace && Boolean(runningJobId)}
+        />
       )}
     </div>
   );

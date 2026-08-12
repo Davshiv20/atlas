@@ -30,9 +30,11 @@ import { useAppDispatch, useAppSelector } from "@/store";
 export function ReviewQueue({
   output,
   workspace,
+  analysing = false,
 }: {
   output: SchemaOutput;
   workspace: string;
+  analysing?: boolean;
 }) {
   const dispatch = useAppDispatch();
   const search = useAppSelector((s) => s.ui.search);
@@ -96,6 +98,7 @@ export function ReviewQueue({
             table={table}
             workspace={workspace}
             analysed={table.analyzed}
+            analysing={analysing}
           />
         ) : analysed === 0 ? (
           /* Not the same as an empty queue, and it must not be dressed as one.
