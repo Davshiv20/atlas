@@ -5,8 +5,9 @@ import { describeError } from "@/api/errors";
 import { Button } from "@/components/ui/Button";
 import { isGap, needsReview, rowsFor, type ReviewRow } from "@/lib/queue";
 import { canVerify, trustPercent } from "@/lib/review";
-import { useReviewMutation } from "@/store/api";
-import { useAppSelector } from "@/store";
+import { useAnalyzeMutation, useReviewMutation } from "@/store/api";
+import { startJob } from "@/store/uiSlice";
+import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
  * Review as a diff.
@@ -24,7 +25,7 @@ import { useAppSelector } from "@/store";
  * confirmations broken by the occasional edit.
  */
 
-type Decision = "endorse" | "dispute";
+type Decision = "approve" | "reject";
 
 interface Staged {
   decision: Decision;
@@ -38,7 +39,7 @@ function markFor(row: ReviewRow, staged: Staged | undefined): {
   label: string;
 } {
   if (staged) {
-    return staged.decision === "endorse"
+    return staged.decision === "approve"
       ? { glyph: "✓", tone: "text-cta", label: "staged" }
       : { glyph: "✗", tone: "text-cta", label: "staged" };
   }
@@ -62,8 +63,11 @@ export function ReviewDiff({
   /** A run is in flight, so an absent claim may simply not exist yet. */
   analysing: boolean;
 }) {
+  const dispatch = useAppDispatch();
   const reviewer = useAppSelector((state) => state.ui.reviewer);
   const [review, { isLoading: submitting }] = useReviewMutation();
+  const [analyze, { isLoading: starting }] = useAnalyzeMutation();
+  const [confirmingRegenerate, setConfirmingRegenerate] = useState(false);
   const [staged, setStaged] = useState<Record<string, Staged>>({});
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
@@ -83,7 +87,29 @@ export function ReviewDiff({
     setCursor(0);
     setEditing(null);
     setFailure(null);
+    setConfirmingRegenerate(false);
   }, [table.name]);
+
+  // One table, on its own. The bulk control ranks the whole schema and is
+  // the wrong instrument once you are looking at a specific table's gaps.
+  const runThisTable = useCallback(
+    async (regenerate: boolean) => {
+      setFailure(null);
+      try {
+        const started = await analyze({
+          workspace,
+          limit: null,
+          regenerate,
+          tables: [table.name],
+        }).unwrap();
+        dispatch(startJob({ id: started.id, workspace }));
+        setConfirmingRegenerate(false);
+      } catch (error) {
+        setFailure(describeError(error, `Could not start analysis for ${table.name}.`));
+      }
+    },
+    [analyze, dispatch, table.name, workspace],
+  );
 
   // Deliberately not `scrollIntoView`. That scrolls every scrollable ancestor
   // on both axes — and an `overflow: hidden` ancestor is still programmatically
@@ -128,7 +154,7 @@ export function ReviewDiff({
           workspace,
           claimId,
           body: {
-            decision: (decision.decision === "endorse"
+            decision: (decision.decision === "approve"
               ? "verified"
               : "rejected") as ClaimStatus,
             reviewer,
@@ -168,7 +194,7 @@ export function ReviewDiff({
       if (!current) return;
       if (key === "a" && canVerify(current.claim!)) {
         event.preventDefault();
-        stage(current, "endorse");
+        stage(current, "approve");
       } else if (key === "r") {
         event.preventDefault();
         stage(current, "dispute");
@@ -191,6 +217,7 @@ export function ReviewDiff({
   }, [actionable.length, current, editing, stage, submit]);
 
   const stagedCount = Object.keys(staged).length;
+  const claimCount = rows.filter((row) => row.claim).length;
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -202,6 +229,55 @@ export function ReviewDiff({
             <h2 className="ident text-table text-ink">{table.qualified_name}</h2>
             <span className="text-meta tabular-nums text-ink-3">
               {table.row_count.toLocaleString()} rows · {table.columns.length} columns
+            </span>
+
+            <span className="ml-auto flex shrink-0 items-center gap-2">
+              {confirmingRegenerate ? (
+                <>
+                  {/* Regeneration discards this table's claims rather than
+                      merging, so the count is stated before it happens — the
+                      bulk control says the same thing behind a checkbox. */}
+                  <span className="text-meta text-amber-strong">
+                    Discards {claimCount} claim{claimCount === 1 ? "" : "s"} and their
+                    evidence.
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    disabled={starting}
+                    onClick={() => void runThisTable(true)}
+                  >
+                    {starting ? "Starting…" : "Regenerate"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setConfirmingRegenerate(false)}
+                  >
+                    Cancel
+                  </Button>
+                </>
+              ) : analysed ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={analysing || starting}
+                  title={analysing ? "A run is already in flight" : undefined}
+                  onClick={() => setConfirmingRegenerate(true)}
+                >
+                  Regenerate this table
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={analysing || starting}
+                  title={analysing ? "A run is already in flight" : undefined}
+                  onClick={() => void runThisTable(false)}
+                >
+                  {starting ? "Starting…" : "Analyse this table"}
+                </Button>
+              )}
             </span>
           </div>
           {analysed ? (
@@ -328,7 +404,7 @@ function Hunk({
           </span>
           {staged ? (
             <span className="ml-auto shrink-0 text-meta font-semibold text-cta">
-              {staged.decision === "endorse" ? "staged · endorse" : "staged · dispute"}
+              {staged.decision === "approve" ? "staged · endorse" : "staged · dispute"}
             </span>
           ) : row.claim ? (
             <span className="ml-auto shrink-0 text-meta tabular-nums text-ink-3">
@@ -360,7 +436,7 @@ function Hunk({
                 size="sm"
                 variant="primary"
                 disabled={!draft.trim()}
-                onClick={() => onStage("endorse", draft.trim())}
+                onClick={() => onStage("approve", draft.trim())}
               >
                 Stage this wording
               </Button>
@@ -404,12 +480,12 @@ function Hunk({
         {focused && decidable && !editing && !staged && (
           <p className="mt-2 flex items-center gap-3 text-meta text-ink-4">
             {canVerify(row.claim!) ? (
-              <button type="button" className="hover:text-ink" onClick={() => onStage("endorse")}>
-                <kbd className="font-mono text-ink-3">a</kbd> endorse
+              <button type="button" className="hover:text-ink" onClick={() => onStage("approve")}>
+                <kbd className="font-mono text-ink-3">a</kbd> approve
               </button>
             ) : (
               <span title="Nothing has tested this claim yet">
-                <kbd className="font-mono">a</kbd> endorse · grounds it on your say-so
+                <kbd className="font-mono">a</kbd> approve · grounds it on your say-so
               </span>
             )}
             <button type="button" className="hover:text-ink" onClick={onEdit}>

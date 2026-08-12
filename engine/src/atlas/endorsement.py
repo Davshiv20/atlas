@@ -54,7 +54,7 @@ class Endorsement(StrEnum):
     AUTO = "auto"
     """Policy accepted it. No person was involved, and none is implied."""
 
-    ENDORSED = "endorsed"
+    APPROVED = "approve"
     """A person confirmed the meaning the model proposed."""
 
     AUTHORED = "authored"
@@ -67,7 +67,7 @@ class Endorsement(StrEnum):
     """Backed by a person, but the evidence they decided against has changed."""
 
 
-BACKED = (Endorsement.ENDORSED, Endorsement.AUTHORED)
+BACKED = (Endorsement.APPROVED, Endorsement.AUTHORED)
 
 
 class EndorsementFactors(BaseModel):
@@ -83,7 +83,7 @@ class EndorsementFactors(BaseModel):
     """Who decided. Self-declared until Atlas has authentication."""
 
     specificity: str | None = None
-    """`authored` or `endorsed` — writing meaning is a stronger act than agreeing."""
+    """`authored` or `approved` — writing meaning is a stronger act than agreeing."""
 
     scope: list[str] = Field(default_factory=list)
     """The evidence ids the decision was taken against."""
@@ -161,7 +161,7 @@ def endorsement(
     currency = 1.0 if not saw else len(still_standing) / len(saw)
 
     specificity = record.observation.get(SPECIFICITY)
-    state = Endorsement.AUTHORED if specificity == "authored" else Endorsement.ENDORSED
+    state = Endorsement.AUTHORED if specificity == "authored" else Endorsement.APPROVED
     reasons = [f"{state.value} by {', '.join(_deciders(record)) or 'a reviewer'}"]
 
     if currency < 1.0:
@@ -243,7 +243,7 @@ def from_legacy_status(status: str, reviewer: str) -> EndorsementAssessment:
     over: an approval whose grounds are unknown cannot be told it has gone
     stale, and saying so is more useful than inventing a basis for it.
     """
-    state = Endorsement.DISPUTED if status == "rejected" else Endorsement.ENDORSED
+    state = Endorsement.DISPUTED if status == "rejected" else Endorsement.APPROVED
     return EndorsementAssessment(
         state=state,
         factors=EndorsementFactors(standing=[reviewer], corroboration=1),
@@ -289,7 +289,7 @@ def projected_status(state: Endorsement) -> str:
         Endorsement.NONE: "unverified",
         Endorsement.STALE: "unverified",
         Endorsement.AUTO: "auto_accepted",
-        Endorsement.ENDORSED: "verified",
+        Endorsement.APPROVED: "verified",
         Endorsement.AUTHORED: "verified",
         Endorsement.DISPUTED: "rejected",
     }

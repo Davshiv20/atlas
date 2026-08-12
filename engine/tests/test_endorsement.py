@@ -79,7 +79,7 @@ def test_endorsing_records_who_and_what_they_saw() -> None:
     )
     assessment = endorsement(store.for_claim(fact.id))
 
-    assert assessment.state is Endorsement.ENDORSED
+    assert assessment.state is Endorsement.APPROVED
     assert assessment.factors.standing == ["shivam"]
     assert assessment.factors.scope == [observed.id]
     assert assessment.factors.currency == 1.0
@@ -145,7 +145,7 @@ def test_an_endorsement_goes_stale_when_what_it_rested_on_changes() -> None:
     fact, store = record_decision(
         claim(), store, reviewer="shivam", decision=FactStatus.VERIFIED
     )
-    assert endorsement(store.for_claim(fact.id)).state is Endorsement.ENDORSED
+    assert endorsement(store.for_claim(fact.id)).state is Endorsement.APPROVED
 
     # The world moves: the same check now sees orphans, so it is a different
     # record, and the one the reviewer agreed to is no longer among the claim's
@@ -243,7 +243,7 @@ def test_a_review_taken_before_evidence_was_recorded_is_not_lost() -> None:
 
     assert settled.status is FactStatus.VERIFIED
     assert settled.endorsement is not None
-    assert settled.endorsement.state is Endorsement.ENDORSED
+    assert settled.endorsement.state is Endorsement.APPROVED
     assert settled.endorsement.factors.standing == ["shivam"]
     assert "unknown" in " ".join(settled.endorsement.reasons)
 

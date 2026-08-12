@@ -84,8 +84,8 @@ is derived from the observations that exist.
 | Verb | Record | Link | Means |
 |---|---|---|---|
 | **answer** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person supplied the meaning |
-| **endorse** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person confirmed the proposed meaning |
-| **dispute** | `HUMAN_DECISION` · `ASSERTED` · `FAILED` | `CONTRADICTS` | a person asserted against the claim |
+| **APPROVE** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person confirmed the proposed meaning |
+| **REJECT** | `HUMAN_DECISION` · `ASSERTED` · `FAILED` | `CONTRADICTS` | a person asserted against the claim |
 
 The vocabulary already exists — `EvidenceType.HUMAN_DECISION`,
 `Authority.ASSERTED`, `LinkKind.CONTRADICTS` are all defined in

@@ -70,9 +70,9 @@ export function ReviewQueue({
             {table ? (
               <span className="text-ink-3">
                 <kbd className="font-mono">j</kbd> <kbd className="font-mono">k</kbd> move ·{" "}
-                <kbd className="font-mono">a</kbd> endorse ·{" "}
+                <kbd className="font-mono">a</kbd> approve ·{" "}
                 <kbd className="font-mono">e</kbd> edit ·{" "}
-                <kbd className="font-mono">r</kbd> dispute
+                <kbd className="font-mono">r</kbd> reject
               </span>
             ) : analysed === 0 ? (
               "not analysed yet"
