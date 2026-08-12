@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import Engine, inspect, text
@@ -235,9 +236,16 @@ class SnowflakeAdapter(DatabaseAdapter):
 
     # --- profiling -----------------------------------------------------
 
-    def profile(self, snapshot: Snapshot) -> Snapshot:
+    def profile(
+        self, snapshot: Snapshot, on_table: Callable[[str], None] | None = None
+    ) -> Snapshot:
+        def profiled(table: Table) -> Table:
+            if on_table:
+                on_table(table.name)
+            return self._profile_table(table)
+
         return snapshot.model_copy(
-            update={"tables": [self._profile_table(table) for table in snapshot.tables]}
+            update={"tables": [profiled(table) for table in snapshot.tables]}
         )
 
     def _profile_table(self, table: Table) -> Table:

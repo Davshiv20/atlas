@@ -85,7 +85,7 @@ class FakeAdapter:
             tables=[table("orders", namespace)],
         )
 
-    def profile(self, snapshot: Snapshot) -> Snapshot:
+    def profile(self, snapshot: Snapshot, on_table=None) -> Snapshot:
         return snapshot
 
 
@@ -265,7 +265,7 @@ def test_refresh_requires_semantic_reset_and_advances_generation(client, monkeyp
 
 def test_failed_refresh_preserves_the_previous_snapshot_and_semantics(client, monkeypatch) -> None:
     class FailingAdapter(FakeAdapter):
-        def profile(self, snapshot: Snapshot) -> Snapshot:
+        def profile(self, snapshot: Snapshot, on_table=None) -> Snapshot:
             raise RuntimeError("profile failed")
 
     declare_sources()

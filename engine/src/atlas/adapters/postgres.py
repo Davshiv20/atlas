@@ -8,7 +8,7 @@ Holds every line of Postgres-specific SQL that used to sit in `extract.py`,
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -201,9 +201,16 @@ class PostgresAdapter(DatabaseAdapter):
 
     # --- profiling ---------------------------------------------------------
 
-    def profile(self, snapshot: Snapshot) -> Snapshot:
+    def profile(
+        self, snapshot: Snapshot, on_table: Callable[[str], None] | None = None
+    ) -> Snapshot:
+        def profiled(table: Table) -> Table:
+            if on_table:
+                on_table(table.name)
+            return self._profile_table(table)
+
         return snapshot.model_copy(
-            update={"tables": [self._profile_table(t) for t in snapshot.tables]}
+            update={"tables": [profiled(t) for t in snapshot.tables]}
         )
 
     def _profile_table(self, table: Table) -> Table:

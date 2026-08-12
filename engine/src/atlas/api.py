@@ -736,12 +736,34 @@ def extract(name: str, request: ExtractRequest = Body(default=ExtractRequest()))
 
     def work(report: ProgressReporter) -> dict:
         with create_adapter(url) as adapter:
+            report(JobProgress(message="Connecting"))
             adapter.test_connection()
             report(JobProgress(message="Reading structure"))
             snapshot = adapter.extract_structure(source.namespace)
+
             if request.profile:
-                report(JobProgress(message=f"Profiling {len(snapshot.tables)} tables"))
-                snapshot = adapter.profile(snapshot)
+                # Profiling is the long half and it is per table, so it is
+                # reported per table. A single "profiling 20 tables" line left
+                # minutes of silence on a warehouse, which reads as a hang and
+                # is why the button got pressed again.
+                names = [table.name for table in snapshot.tables]
+                done: list[str] = []
+
+                def started(name: str) -> None:
+                    report(
+                        JobProgress(
+                            message=f"Profiling {name}",
+                            tables=names,
+                            completed=list(done),
+                            current=[name],
+                        )
+                    )
+                    done.append(name)
+
+                report(JobProgress(message="Profiling columns", tables=names))
+                snapshot = adapter.profile(snapshot, on_table=started)
+
+            report(JobProgress(message="Saving snapshot"))
         workspace.assert_identity(
             source_id=manifest.source_id,
             incarnation_id=manifest.incarnation_id,

@@ -20,6 +20,7 @@ per constraint rather than assumed from the dialect.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Self
 
@@ -176,8 +177,15 @@ class DatabaseAdapter(ABC):
         """
 
     @abstractmethod
-    def profile(self, snapshot: Snapshot) -> Snapshot:
-        """Return a copy of the snapshot with column distributions filled in."""
+    def profile(
+        self, snapshot: Snapshot, on_table: Callable[[str], None] | None = None
+    ) -> Snapshot:
+        """Return a copy of the snapshot with column distributions filled in.
+
+        `on_table` is called with each table name as it starts. Profiling is
+        the slow half of an extract — a full aggregate sweep and a value scan
+        per column — and without this the caller can only report that it
+        began, which on a warehouse leaves minutes of silence."""
 
     @abstractmethod
     def execute_check(self, check: Check) -> CheckObservation:

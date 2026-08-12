@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { SnowflakeAuthMethod, SourceStatus, WorkspaceSummary } from "@/api/types";
+import type { Job, SnowflakeAuthMethod, SourceStatus, WorkspaceSummary } from "@/api/types";
 import { Modal } from "@/components/Modal";
 import { SourceForm } from "@/components/SourceForm";
 import {
@@ -12,6 +12,7 @@ import {
   useForgetCredentialsMutation,
   useSetCredentialsMutation,
   useSetSnowflakeCredentialsMutation,
+  useJobQuery,
   useSourcesQuery,
   useTestSourceMutation,
   useWorkspacesQuery,
@@ -295,6 +296,66 @@ function NewConnectionTile({ onClick }: { onClick: () => void }) {
 
 /** Everything after a connection exists: check it, read it, remove it. */
 /**
+ * A schema read, while it is happening.
+ *
+ * Extraction is two phases with very different costs: reading structure is
+ * quick, and profiling opens a full aggregate sweep and a value scan per column
+ * against a live database. On a warehouse that is minutes. The bar is driven by
+ * the tables the engine reports finishing, and the table currently under way is
+ * named, because "working…" and "hung" look identical otherwise.
+ */
+function ReadingProgress({ job }: { job: Job | undefined }) {
+  const progress = job?.progress;
+  const total = progress?.tables.length ?? 0;
+  const done = progress?.completed.length ?? 0;
+  const current = progress?.current ?? [];
+  // Structure comes back before any table is known, so there is a real stretch
+  // with nothing to divide. An indeterminate bar is honest there.
+  const share = total > 0 ? Math.round((done / total) * 100) : null;
+
+  return (
+    <div className="mb-4 rounded-[--radius-control] border border-line bg-raised px-3 py-3">
+      <div className="flex items-baseline gap-2">
+        <span aria-hidden className="size-[7px] shrink-0 animate-pulse rounded-full bg-cta" />
+        <span className="text-body font-medium text-ink">
+          {progress?.message ?? "Starting…"}
+        </span>
+        {share !== null && (
+          <span className="ml-auto text-meta tabular-nums text-ink-3">
+            {done} of {total} tables
+          </span>
+        )}
+      </div>
+
+      <div
+        className="mt-2 h-[4px] overflow-hidden rounded-full bg-sunken"
+        role="progressbar"
+        aria-valuenow={share ?? undefined}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Reading schema"
+      >
+        <div
+          className={`h-full rounded-full bg-cta ${share === null ? "w-1/3 animate-pulse" : ""}`}
+          style={share === null ? undefined : { width: `${Math.max(share, 2)}%` }}
+        />
+      </div>
+
+      {current.length > 0 && (
+        <p className="ident mt-2 truncate text-meta text-ink-3" title={current.join(", ")}>
+          reading {current.join(", ")}
+        </p>
+      )}
+      <p className="mt-2 text-meta text-ink-4">
+        Profiling reads every column — row counts, null rates, distinct counts and
+        sample values. Leave this open; it keeps running if you close it.
+      </p>
+    </div>
+  );
+}
+
+
+/**
  * What happens, in the order it happens.
  *
  * Four controls sit below this: two of them open a connection to the customer's
@@ -375,7 +436,28 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
   const [deleteWorkspace, { isLoading: deletingWorkspace }] = useDeleteWorkspaceMutation();
   const [remove, { isLoading: deletingSource }] = useDeleteSourceMutation();
   const [extractError, setExtractError] = useState<string | null>(null);
+  // Extraction returns 202 and keeps working. Closing on that response is
+  // what left the reader with no signal at all — the dialog vanished, the
+  // warehouse ran for minutes, and the obvious conclusion was that nothing
+  // had happened.
+  const [jobId, setJobId] = useState<string | null>(null);
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const { data: job } = useJobQuery(jobId ?? "", {
+    skip: !jobId,
+    pollingInterval: 1000,
+  });
+  const reading = Boolean(jobId) && (job?.status === "running" || job?.status === "pending");
+
+  useEffect(() => {
+    if (!job || job.status === "running" || job.status === "pending") return;
+    setJobId(null);
+    if (job.status === "succeeded") {
+      dispatch(selectWorkspace(workspaceId));
+      onClose();
+      return;
+    }
+    setExtractError(job.error ?? "The schema read did not finish.");
+  }, [job, dispatch, workspaceId, onClose]);
 
   return (
     <Modal
@@ -391,7 +473,11 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
 
       {/* What each control does, before it is pressed. Two of the four read the
           database and one discards work, and none of them said so. */}
-      <Stages source={source} hasSnapshot={Boolean(existingWorkspace?.snapshot_available)} />
+      {reading ? (
+        <ReadingProgress job={job} />
+      ) : (
+        <Stages source={source} hasSnapshot={Boolean(existingWorkspace?.snapshot_available)} />
+      )}
 
       <CredentialField source={source} />
 
@@ -399,7 +485,7 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
         <button
           type="button"
           onClick={() => test(source.id)}
-          disabled={testing}
+          disabled={testing || reading}
           className="rounded-[--radius-control] border border-line px-3 py-1.5 text-body text-ink hover:bg-raised disabled:text-ink-4"
         >
           {testing ? "Checking…" : "Test connection"}
@@ -407,7 +493,7 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
 
         <button
           type="button"
-          disabled={source.health.state !== "connected" || extracting}
+          disabled={source.health.state !== "connected" || extracting || reading}
           onClick={async () => {
             setExtractError(null);
             const resetSemantics = Boolean(existingWorkspace?.snapshot_available);
@@ -423,23 +509,26 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
               if (!existingWorkspace) {
                 await createWorkspace({ id: workspaceId, source_id: source.id }).unwrap();
               }
-              await extract({ workspace: workspaceId, resetSemantics }).unwrap();
+              const started = await extract({
+                workspace: workspaceId,
+                resetSemantics,
+              }).unwrap();
+              // Stay open and watch it. The dialog closes when the read is
+              // actually finished, not when the server accepted the request.
+              setJobId(started.id);
             } catch (error) {
               setExtractError(describeError(error, "Could not read the schema."));
-              return;
             }
-            dispatch(selectWorkspace(workspaceId));
-            onClose();
           }}
           className="rounded-[--radius-control] bg-cta px-3 py-1.5 text-body font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
         >
-          {extracting ? "Reading schema…" : "Read schema"}
+          {extracting || reading ? "Reading schema…" : "Read schema"}
         </button>
 
         {existingWorkspace && (
           <button
             type="button"
-            disabled={deletingWorkspace}
+            disabled={deletingWorkspace || reading}
             onClick={async () => {
               if (
                 !window.confirm(
@@ -466,7 +555,7 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
 
         <button
           type="button"
-          disabled={Boolean(existingWorkspace) || deletingSource}
+          disabled={Boolean(existingWorkspace) || deletingSource || reading}
           title={existingWorkspace ? "Delete the workspace before removing its source." : undefined}
           onClick={async () => {
             if (!window.confirm(`Remove source ${source.id}?`)) return;
