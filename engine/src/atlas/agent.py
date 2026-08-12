@@ -68,9 +68,8 @@ that says what the quantity measures, in what unit, and who acts on it.
 2. Grain next, once you know what the columns are. State exactly what one row \
 represents, in the form "one row per X". This is the single most consequential \
 claim about a table: an agent that has the grain wrong writes silently \
-double-counting joins. Record it with `record_grain`, and be honest in the \
-confidence — a grain you inferred from a primary key alone is not the same as \
-one you confirmed against the columns that actually vary per row.
+double-counting joins. Record it with `record_claim` using aspect `grain`; Atlas \
+computes confidence from the evidence you cite.
 3. The table description last, synthesized from the columns and the grain. It \
 should be something you could only write having read the columns — if it could \
 have been written from the table name alone, it is not worth recording.
@@ -546,19 +545,45 @@ def build_tools(
 
 
 class ReadTable(dspy.Signature):
-    """Establish what a table means, grounding every claim in an executed check.
-
-    The prose this returns is discarded. A claim only exists once
-    `record_claim` has accepted it with evidence, so the summary is a
-    courtesy to the log, never a source of truth — an assertion that appears
-    only here was never grounded and is not part of the catalogue.
-    """
-
     table: str = dspy.InputField(desc="Physical detail: columns, types, profiles, samples.")
     established: str = dspy.InputField(
         desc="Relationships already settled against the database. Do not re-check these."
     )
     summary: str = dspy.OutputField(desc="What you established and what remains unclear.")
+
+
+# DSPy takes its signature instructions from the signature class, not from a
+# module constant. Keeping SYSTEM_PROMPT separate without applying it meant the
+# model never received the every-column contract even though the code looked as
+# if it had one.
+ReadTable = ReadTable.with_instructions(SYSTEM_PROMPT)
+
+
+class CompleteColumns(dspy.Signature):
+    table: str = dspy.InputField(desc="Physical detail for the table being repaired.")
+    missing: str = dspy.InputField(desc="Columns still missing a semantics claim.")
+    established: str = dspy.InputField(desc="Relationships already settled mechanically.")
+    summary: str = dspy.OutputField(desc="Which missing column meanings were established.")
+
+
+CompleteColumns = CompleteColumns.with_instructions(
+    "Finish the incomplete table reading. For every column named in `missing`, run a "
+    "relevant check and record exactly one `semantics` claim with `record_claim`. "
+    "A metric, quality, lifecycle, or unit claim does not replace semantics. Do not "
+    "redo columns that are not listed. If business intent cannot be proved, record the "
+    "narrowest evidence-grounded physical role the data supports and ask a focused "
+    "human question for the unresolved business interpretation. Prose is discarded; "
+    "only accepted tool calls count."
+)
+
+
+def _undescribed_columns(table: Table, sink: AnalysisSink) -> list[str]:
+    described = {fact.subject for fact in sink.facts if fact.aspect == "semantics"}
+    return [
+        column.name
+        for column in table.columns
+        if f"{table.name}.{column.name}" not in described
+    ]
 
 
 def analyze_table(
@@ -568,9 +593,10 @@ def analyze_table(
     relationships: list[str] | None = None,
 ) -> AnalysisSink:
     sink = AnalysisSink()
+    tools = build_tools(adapter, snapshot, sink)
     agent = dspy.ReAct(
         ReadTable,
-        tools=build_tools(adapter, snapshot, sink),
+        tools=tools,
         # The same ceiling as before, and the same meaning: a reading cut off
         # here is partial, not wrong.
         max_iters=get_settings().atlas_max_turns,
@@ -596,25 +622,41 @@ def analyze_table(
             get_settings().atlas_max_turns,
             len(sink.facts),
         )
-    # Which columns came back without a meaning, and say so out loud.
-    #
-    # A silent version of this is how four quantity columns ended up reported as
-    # having no established meaning: the model ran a distribution check on each,
-    # recorded the result as a `metric` claim, considered the column handled and
-    # moved on. `metric` is not a description, so the catalogue was right to say
-    # nothing was established — but nothing anywhere said the analysis had left
-    # them behind, so the first anyone knew was reading the emitted YAML.
-    described = {
-        fact.subject for fact in sink.facts if fact.aspect in ("semantics", "unit")
-    }
-    sink.undescribed = [
-        column.name
-        for column in table.columns
-        if f"{table.name}.{column.name}" not in described
-    ]
+    # Repair omissions immediately rather than logging them and then marking
+    # the table analyzed. The focused second pass has one job and reuses the
+    # first pass's accepted evidence and claims.
+    sink.undescribed = _undescribed_columns(table, sink)
     if sink.undescribed:
+        logger.info(
+            "[%s] completing semantics for %d omitted column(s): %s",
+            table.name,
+            len(sink.undescribed),
+            ", ".join(sink.undescribed),
+        )
+        repair = dspy.ReAct(
+            CompleteColumns,
+            tools=tools,
+            max_iters=get_settings().atlas_max_turns,
+        )
+        repair_prediction = repair(
+            table=render_table(snapshot, table, relationships),
+            missing=", ".join(sink.undescribed),
+            established="\n".join(relationships or []) or "none established",
+        )
+        repair_trajectory = getattr(repair_prediction, "trajectory", {}) or {}
+        repair_calls = [
+            name for key, name in repair_trajectory.items() if key.startswith("tool_name_")
+        ]
+        sink.trajectory.extend(repair_calls)
+        sink.undescribed = _undescribed_columns(table, sink)
+
+    if sink.undescribed:
+        # This table remains incomplete and must be selected again by a future
+        # analysis run. Never silently convert model early-exit into catalogue
+        # completeness.
+        sink.truncated = True
         logger.warning(
-            "[%s] %d column(s) have no semantics claim: %s",
+            "[%s] %d column(s) still have no semantics claim after repair: %s",
             table.name,
             len(sink.undescribed),
             ", ".join(sink.undescribed),

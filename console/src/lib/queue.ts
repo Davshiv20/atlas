@@ -93,9 +93,26 @@ export function buildQueue(output: SchemaOutput, filter: Filter = "needs-review"
   };
 }
 
+/**
+ * How many tables a filter selects.
+ *
+ * Counted over every table, not just the analysed ones. `buildQueue` drops
+ * anything unanalysed before it counts, so a schema with one analysed table out
+ * of twenty reported "not generated 1" — the single analysed table happened to
+ * contain a gap, while the nineteen with nothing generated at all were not
+ * being counted by the filter that exists to find them. Every chip read `1`,
+ * and they all meant different things.
+ */
 export function countFor(output: SchemaOutput, filter: Filter): number {
-  if (filter === "all") return output.tables.filter((table) => table.analyzed).length;
-  return buildQueue(output, filter).tables.length;
+  if (filter === "all") return output.tables.length;
+  // A table nobody has analysed is the plainest case of nothing generated.
+  if (filter === "not-generated") {
+    return output.tables.filter((table) => !table.analyzed).length;
+  }
+
+  const analysed = output.tables.filter((table) => table.analyzed).map(toProgress);
+  if (filter === "weak-trust") return analysed.filter((entry) => entry.weakTrust > 0).length;
+  return analysed.filter((entry) => entry.highlighted > 0).length;
 }
 
 export function rowsFor(table: TableOutput, filter: Filter = "all"): ReviewRow[] {
@@ -219,7 +236,11 @@ function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<Revie
 function matchesTable(entry: TableProgress, filter: Filter): boolean {
   if (filter === "needs-review") return entry.highlighted > 0;
   if (filter === "weak-trust") return entry.weakTrust > 0;
-  if (filter === "not-generated") return entry.gaps > 0;
+  // Selects nothing here on purpose. `not-generated` means tables with no
+  // analysis, and those never reach this predicate — `buildQueue` has already
+  // put them in `notAnalysed`. Matching analysed tables too would make the
+  // list disagree with the count beside the chip.
+  if (filter === "not-generated") return false;
   return true;
 }
 
