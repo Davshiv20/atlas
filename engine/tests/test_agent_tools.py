@@ -214,13 +214,23 @@ def test_render_shows_values() -> None:
     assert "111 rows" in rendered
 
 
-def test_render_separates_shape_determined_columns() -> None:
+def test_render_asks_for_every_column_including_the_keys() -> None:
+    """Shape-determined columns used to be listed separately and withheld.
+
+    That produced a catalogue with holes in it, and left a reader unable to tell
+    a column Atlas judged self-evident from one the analysis never reached. It
+    also gave away real meaning: a purchase-order number is what a buyer quotes
+    to a supplier, and "surrogate key" says none of that.
+    """
     snapshot = make_snapshot()
     rendered = render_table(snapshot, snapshot.table("deliverables"))
-    describe, routine = rendered.split("SHAPE-DETERMINED COLUMNS")
-    assert "stage" in describe.split("COLUMNS TO DESCRIBE")[1]
-    assert "id" in routine
-    assert "do not record claims for these" in rendered
+
+    assert "SHAPE-DETERMINED COLUMNS" not in rendered
+    assert "do not record claims" not in rendered
+
+    columns = rendered.split("COLUMNS TO DESCRIBE")[1]
+    for name in (column.name for column in snapshot.table("deliverables").columns):
+        assert name in columns, f"{name} was not offered for description"
 
 
 # --- a truncated reading says so -------------------------------------------

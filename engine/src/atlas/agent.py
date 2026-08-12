@@ -25,7 +25,7 @@ from atlas.adapters.base import (
     OrderingCheck,
 )
 from atlas.checks import run_check
-from atlas.classify import consequence, worth_describing
+from atlas.classify import consequence
 from atlas.evidence import ClaimEvidence, EvidenceRecord, EvidenceStore, LinkKind, Verdict
 from atlas.facts import Consequence, Fact, FactStatus, FactStore, Provenance, ProvenanceKind
 from atlas.llm import configure
@@ -48,10 +48,15 @@ against this schema, and reviewed by a human first.
 
 Work bottom-up, in this order:
 
-1. Columns first. Describe what each column means, one claim per column. A \
-description states meaning, unit, and role — not its distribution. Skip a \
-column only when its shape already says everything (a surrogate key, an \
-audit timestamp with nothing unusual about it).
+1. Columns first. Describe every column, one claim each, with no exceptions. A \
+description states meaning, unit, and role — not its distribution. Keys, codes \
+and flags are included: what a value identifies, which system issues it, and \
+what someone does with it are business facts that the type and the constraint \
+never state. `part_number` is not "a surrogate key", it is the manufacturer's \
+part identifier that procurement and engineering both quote. Where a column \
+genuinely carries nothing beyond its shape, say that plainly and briefly — but \
+say it, because a column you leave out cannot be told apart from one the \
+analysis failed to reach.
 2. Grain next, once you know what the columns are. State exactly what one row \
 represents, in the form "one row per X". This is the single most consequential \
 claim about a table: an agent that has the grain wrong writes silently \
@@ -145,23 +150,22 @@ def render_table(
         lines.append(f"index{' unique' if index.unique else ''}: {', '.join(index.columns)}")
 
     lines.append(f"referenced by {snapshot.inbound_fk_count(table.name)} other table(s)")
-    describable = [c for c in table.columns if worth_describing(table, c)]
-    routine = [c for c in table.columns if not worth_describing(table, c)]
-
+    # Every column, none marked as beneath describing. The shape says how a
+    # column behaves; it does not say what the business calls it or what it is
+    # used for, and those are the things this catalogue exists to record.
     lines.append("")
-    lines.append("COLUMNS TO DESCRIBE")
-    for column in describable:
+    lines.append("COLUMNS TO DESCRIBE — every one of them")
+    for column in table.columns:
         lines.append(f"  {column.name} ({column.data_type}){_column_detail(column)}")
-
-    if routine:
-        lines.append("")
-        lines.append(
-            "SHAPE-DETERMINED COLUMNS — do not record claims for these. Their meaning "
-            "follows from name and type; a description would add nothing a reader does "
-            "not already have. Use them for grain and joins."
-        )
-        for column in routine:
-            lines.append(f"  {column.name} ({column.data_type})")
+    lines.append("")
+    lines.append(
+        "Identifiers and flags carry business meaning too, and it is often the "
+        "meaning an agent most needs. A purchase-order number is what a buyer "
+        "quotes to a supplier; a site code names a plant someone can point at; a "
+        "deletion indicator encodes a convention about what rows survive. "
+        "'Surrogate key' describes the mechanics and answers none of that. Say "
+        "what the value identifies, where it comes from, and what it is used for."
+    )
 
     lines.append("")
     lines.append("OTHER TABLES IN SCHEMA")

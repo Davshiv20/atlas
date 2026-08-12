@@ -110,12 +110,16 @@ def consequence(table: Table, column: Column | None, aspect: str) -> Consequence
     return Consequence.HIGH
 
 
-def worth_describing(table: Table, column: Column) -> bool:
-    """Whether a generated description would add anything.
-
-    Suppressing these is the largest single reduction in review load, and it
-    happens before a reviewer opens anything: the claim is never created.
-    """
-    return consequence(table, column, "semantics") is not Consequence.ROUTINE
+# Every column is described. There is no `worth_describing` any more.
+#
+# It used to suppress routine columns before a claim was ever created, on the
+# grounds that a description of `id` or `created_at` adds nothing a reader does
+# not already have. The saving was real, but the artifact it produced was a
+# catalogue with holes in it, and a reader could not tell a column Atlas judged
+# self-evident from one the analysis had missed.
+#
+# Review load is still bounded, by `consequence` rather than by omission: a
+# routine claim that its evidence supports is auto-accepted and never reaches a
+# reviewer. The column gets its meaning; nobody has to read it.
 
 
