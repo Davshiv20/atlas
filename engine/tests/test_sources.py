@@ -466,3 +466,129 @@ def test_connection_errors_are_one_readable_line(client, isolated, monkeypatch) 
     assert health["state"] == "failed"
     assert "\n" not in health["detail"]
     assert len(health["detail"]) < 200
+
+
+def test_snowflake_key_pair_auth_needs_no_person_and_carries_no_password(
+    client, isolated, monkeypatch
+) -> None:
+    """The only Snowflake method that survives a background job.
+
+    Extraction and analysis run for minutes with nobody present. An interactive
+    login authenticates once and leaves the stored credential unable to connect
+    on its own — which is how a green connection test turned into `MFA with TOTP
+    is required` several minutes into a run.
+    """
+    path = isolated / ".secrets.env"
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(path))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        api,
+        "_probe",
+        lambda source, connection_url=None: api.ConnectionHealth(
+            state="connected", detail="connected"
+        ),
+    )
+    assert (
+        client.post(
+            "/sources",
+            json={
+                "id": "trellis",
+                "adapter": "snowflake",
+                "url_env": "TRELLIS_DATABASE_URL",
+                "namespace": "POC_DB.TRELLIS_SOURCE",
+            },
+        ).status_code
+        == 201
+    )
+
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "ATLAS_SVC",
+            "auth_method": "key_pair",
+            "private_key_file": "/etc/atlas/snowflake_key.p8",
+            "private_key_file_pwd": "keeps-the-key-shut",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+    assert response.status_code == 200
+
+    parsed = make_url(os.environ["TRELLIS_DATABASE_URL"])
+    # Exactly the parameter names the Python connector documents.
+    assert parsed.query["authenticator"] == "SNOWFLAKE_JWT"
+    assert parsed.query["private_key_file"] == "/etc/atlas/snowflake_key.p8"
+    assert parsed.query["private_key_file_pwd"] == "keeps-the-key-shut"
+    assert parsed.password is None, "key-pair auth must not carry a password"
+    assert "client_request_mfa_token" not in parsed.query
+
+
+def test_snowflake_key_pair_requires_a_key_file(client, isolated, monkeypatch) -> None:
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(isolated / ".secrets.env"))
+    get_settings.cache_clear()
+    assert (
+        client.post(
+            "/sources",
+            json={
+                "id": "trellis",
+                "adapter": "snowflake",
+                "url_env": "TRELLIS_DATABASE_URL",
+                "namespace": "POC_DB.TRELLIS_SOURCE",
+            },
+        ).status_code
+        == 201
+    )
+    response = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "ATLAS_SVC",
+            "auth_method": "key_pair",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_an_interactive_login_says_it_will_not_survive_a_job(
+    client, isolated, monkeypatch
+) -> None:
+    """A green test on MFA proves a person was here, not that a job can run."""
+    monkeypatch.setenv("ATLAS_SECRETS_FILE", str(isolated / ".secrets.env"))
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        api,
+        "_probe",
+        lambda source, connection_url=None: api.ConnectionHealth(
+            state="connected", detail="Connected — Snowflake 9.x"
+        ),
+    )
+    assert (
+        client.post(
+            "/sources",
+            json={
+                "id": "trellis",
+                "adapter": "snowflake",
+                "url_env": "TRELLIS_DATABASE_URL",
+                "namespace": "POC_DB.TRELLIS_SOURCE",
+            },
+        ).status_code
+        == 201
+    )
+    body = client.put(
+        "/sources/trellis/credentials/snowflake",
+        json={
+            "account_identifier": "myorg-myaccount",
+            "username": "SHIVAM",
+            "auth_method": "mfa_totp",
+            "password": "secret",
+            "passcode": "123456",
+            "warehouse": "POC_WH",
+            "role": "ATLAS_READER",
+        },
+    ).json()
+    assert body["state"] == "connected"
+    assert "unattended" in body["detail"]
+    assert "ALLOW_CLIENT_MFA_CACHING" in body["detail"]

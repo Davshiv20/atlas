@@ -40,6 +40,8 @@ export function SourceForm({
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [username, setUsername] = useState("");
   const [authMethod, setAuthMethod] = useState<SnowflakeAuthMethod>("mfa_totp");
+  const [privateKeyFile, setPrivateKeyFile] = useState("");
+  const [privateKeyPwd, setPrivateKeyPwd] = useState("");
   const [password, setPassword] = useState("");
   const [passcode, setPasscode] = useState("");
   const [warehouse, setWarehouse] = useState("");
@@ -67,8 +69,16 @@ export function SourceForm({
                   account_identifier: accountIdentifier,
                   username,
                   auth_method: authMethod,
-                  ...(authMethod !== "external_browser" ? { password } : {}),
+                  ...(authMethod !== "external_browser" && authMethod !== "key_pair"
+                    ? { password }
+                    : {}),
                   ...(authMethod === "mfa_totp" ? { passcode } : {}),
+                  ...(authMethod === "key_pair"
+                    ? {
+                        private_key_file: privateKeyFile,
+                        ...(privateKeyPwd ? { private_key_file_pwd: privateKeyPwd } : {}),
+                      }
+                    : {}),
                   warehouse,
                   role,
                 },
@@ -166,13 +176,14 @@ export function SourceForm({
               onChange={(event) => setAuthMethod(event.target.value as SnowflakeAuthMethod)}
               className={INPUT}
             >
+              <option value="key_pair">Key pair · runs unattended</option>
               <option value="mfa_totp">Password + authenticator code</option>
               <option value="mfa_push">Password + MFA push</option>
               <option value="password">Programmatic token or password</option>
               <option value="external_browser">Corporate browser SSO (SAML)</option>
             </select>
           </Field>
-          {authMethod !== "external_browser" && (
+          {authMethod !== "external_browser" && authMethod !== "key_pair" && (
             <Field label={authMethod === "password" ? "Password or token" : "Password"}>
               <input
                 type="password"
@@ -201,6 +212,29 @@ export function SourceForm({
                 className={`${INPUT} font-mono`}
               />
             </Field>
+          )}
+          {authMethod === "key_pair" && (
+            <>
+              <Field label="Private key file" hint="path on the engine host">
+                <input
+                  value={privateKeyFile}
+                  onChange={(event) => setPrivateKeyFile(event.target.value)}
+                  placeholder="/etc/atlas/snowflake_key.p8"
+                  required
+                  spellCheck={false}
+                  className={`${INPUT} font-mono`}
+                />
+              </Field>
+              <Field label="Key passphrase" hint="optional">
+                <input
+                  type="password"
+                  value={privateKeyPwd}
+                  onChange={(event) => setPrivateKeyPwd(event.target.value)}
+                  placeholder="Leave empty if unencrypted"
+                  className={INPUT}
+                />
+              </Field>
+            </>
           )}
           <Field label="Role">
             <input
@@ -262,7 +296,8 @@ export function SourceForm({
                 !username ||
                 !warehouse ||
                 !role ||
-                (authMethod !== "external_browser" && !password) ||
+                (authMethod !== "external_browser" && authMethod !== "key_pair" && !password) ||
+                (authMethod === "key_pair" && !privateKeyFile) ||
                 (authMethod === "mfa_totp" && !/^\d{6}$/.test(passcode))))
           }
           className="rounded-[--radius-control] bg-cta px-4 py-2 text-body font-medium text-cta-ink transition-colors hover:bg-cta-hover disabled:cursor-not-allowed disabled:bg-raised disabled:text-ink-4"

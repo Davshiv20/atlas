@@ -501,6 +501,8 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
   const [accountIdentifier, setAccountIdentifier] = useState("");
   const [username, setUsername] = useState("");
   const [authMethod, setAuthMethod] = useState<SnowflakeAuthMethod>("mfa_totp");
+  const [privateKeyFile, setPrivateKeyFile] = useState("");
+  const [privateKeyPwd, setPrivateKeyPwd] = useState("");
   const [password, setPassword] = useState("");
   const [passcode, setPasscode] = useState("");
   const [warehouse, setWarehouse] = useState("");
@@ -552,8 +554,16 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
               account_identifier: accountIdentifier,
               username,
               auth_method: authMethod,
-              ...(authMethod !== "external_browser" ? { password } : {}),
+              ...(authMethod !== "external_browser" && authMethod !== "key_pair"
+                ? { password }
+                : {}),
               ...(authMethod === "mfa_totp" ? { passcode } : {}),
+              ...(authMethod === "key_pair"
+                ? {
+                    private_key_file: privateKeyFile,
+                    ...(privateKeyPwd ? { private_key_file_pwd: privateKeyPwd } : {}),
+                  }
+                : {}),
               warehouse,
               role,
             },
@@ -579,13 +589,14 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
             onChange={(event) => setAuthMethod(event.target.value as SnowflakeAuthMethod)}
             className="w-full rounded-[--radius-control] border border-line bg-canvas px-2.5 py-2 text-body text-ink focus:border-line-ink focus:outline-none"
           >
+            <option value="key_pair">Key pair · runs unattended</option>
             <option value="mfa_totp">Password + authenticator code</option>
             <option value="mfa_push">Password + MFA push</option>
             <option value="password">Programmatic token or password</option>
             <option value="external_browser">Corporate browser SSO (SAML)</option>
           </select>
         </label>
-        {authMethod !== "external_browser" && (
+        {authMethod !== "external_browser" && authMethod !== "key_pair" && (
           <CredentialInput label={authMethod === "password" ? "Password or token" : "Password"} value={password} onChange={setPassword} placeholder="Entered securely" type="password" autoComplete="current-password" />
         )}
         {authMethod === "mfa_totp" && (
@@ -599,11 +610,30 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
             maxLength={6}
           />
         )}
+        {authMethod === "key_pair" && (
+          <>
+            <CredentialInput
+              label="Private key file · path on the engine host"
+              value={privateKeyFile}
+              onChange={setPrivateKeyFile}
+              placeholder="/etc/atlas/snowflake_key.p8"
+            />
+            <CredentialInput
+              label="Key passphrase · optional"
+              value={privateKeyPwd}
+              onChange={setPrivateKeyPwd}
+              placeholder="Leave empty if unencrypted"
+              type="password"
+            />
+          </>
+        )}
         <CredentialInput label="Role" value={role} onChange={setRole} placeholder="ATLAS_READER" />
       </div>
       <p className="mt-2 text-meta text-ink-3">
-        {authMethod === "mfa_totp"
-          ? "The code is used once and never saved. Atlas requests Snowflake's MFA token cache for later local connections."
+        {authMethod === "key_pair"
+          ? "The key stays on the engine host and is read at connect time — nothing is uploaded. The only method that survives a background job, because it needs no one present."
+          : authMethod === "mfa_totp"
+          ? "The code is used once and never saved. Extraction and analysis run later with no one present, so they depend on Snowflake's MFA token cache — which the account must allow, and which expires."
           : authMethod === "mfa_push"
             ? "Saving sends an MFA approval request. Approve it while Atlas waits for Snowflake."
             : authMethod === "external_browser"
@@ -619,7 +649,8 @@ function SnowflakeCredentialField({ source }: { source: SourceStatus }) {
             !username ||
             !warehouse ||
             !role ||
-            (authMethod !== "external_browser" && !password) ||
+            (authMethod !== "external_browser" && authMethod !== "key_pair" && !password) ||
+            (authMethod === "key_pair" && !privateKeyFile) ||
             (authMethod === "mfa_totp" && !/^\d{6}$/.test(passcode))
           }
           className="rounded-[--radius-control] bg-cta px-3 py-1.5 text-body font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"

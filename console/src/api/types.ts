@@ -265,6 +265,7 @@ export interface Job {
 
 export type SnowflakeAuthMethod =
   | "password"
+  | "key_pair"
   | "mfa_push"
   | "mfa_totp"
   | "external_browser";
@@ -275,6 +276,9 @@ export interface SnowflakeCredentials {
   auth_method: SnowflakeAuthMethod;
   password?: string;
   passcode?: string;
+  /** Path on the engine host. A private key never travels through this API. */
+  private_key_file?: string;
+  private_key_file_pwd?: string;
   warehouse: string;
   role: string;
 }

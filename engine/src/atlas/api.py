@@ -429,17 +429,39 @@ class CredentialRequest(BaseModel):
     url: str = Field(min_length=1, description="Full SQLAlchemy connection URL")
 
 
+#: Auth methods that need a person at the keyboard. Atlas's real work is a
+#: background job — extraction takes seconds and analysis minutes per table —
+#: so a credential of this kind authenticates once and then cannot be reused
+#: when the job actually runs. MFA token caching narrows the window; it does not
+#: close it, because the token expires on the account's schedule and nobody is
+#: there to refresh it.
+INTERACTIVE_AUTH = frozenset({"mfa_push", "mfa_totp", "external_browser"})
+
+
 class SnowflakeCredentialRequest(BaseModel):
     account_identifier: str = Field(min_length=1, examples=["myorg-myaccount"])
     username: str = Field(min_length=1)
-    auth_method: Literal["password", "mfa_push", "mfa_totp", "external_browser"] = "password"
+    auth_method: Literal[
+        "password", "key_pair", "mfa_push", "mfa_totp", "external_browser"
+    ] = "password"
     password: SecretStr | None = Field(default=None, min_length=1)
     passcode: SecretStr | None = Field(default=None, min_length=1)
+    # Read by the engine host, never uploaded: a private key must not travel
+    # through an unauthenticated API, and the file the connector wants is
+    # already on the machine that will use it.
+    private_key_file: str | None = Field(
+        default=None, min_length=1, examples=["/etc/atlas/snowflake_key.p8"]
+    )
+    private_key_file_pwd: SecretStr | None = Field(default=None, min_length=1)
     warehouse: str = Field(min_length=1)
     role: str = Field(min_length=1)
 
     @model_validator(mode="after")
-    def require_password_for_password_auth(self) -> Self:
+    def require_credentials_for_method(self) -> Self:
+        if self.auth_method == "key_pair":
+            if not self.private_key_file:
+                raise ValueError("private_key_file is required for key-pair authentication")
+            return self
         if self.auth_method != "external_browser" and self.password is None:
             raise ValueError("password is required for password, token, or MFA authentication")
         if self.auth_method == "mfa_totp":
@@ -461,8 +483,19 @@ def _snowflake_url(
     database, schema = parts
     query = {"warehouse": request.warehouse, "role": request.role}
     password = request.password.get_secret_value() if request.password else None
-    if request.auth_method in {"mfa_push", "mfa_totp"}:
+    if request.auth_method == "key_pair":
+        # SNOWFLAKE_JWT with a key file on the engine host. The only method here
+        # that needs nobody present, which is what an unattended job requires.
+        query["authenticator"] = "SNOWFLAKE_JWT"
+        query["private_key_file"] = request.private_key_file or ""
+        if request.private_key_file_pwd:
+            query["private_key_file_pwd"] = request.private_key_file_pwd.get_secret_value()
+        password = None
+    elif request.auth_method in {"mfa_push", "mfa_totp"}:
         query["authenticator"] = "username_password_mfa"
+        # Asks Snowflake for a reusable MFA token. It is only honoured when the
+        # account sets ALLOW_CLIENT_MFA_CACHING and the connector can persist it
+        # — which needs `keyring`, hence the secure-local-storage extra.
         query["client_request_mfa_token"] = "true"
         if include_passcode and request.passcode:
             query["passcode"] = request.passcode.get_secret_value()
@@ -517,8 +550,36 @@ def set_snowflake_credentials(
     if request.auth_method == "mfa_totp":
         # A TOTP code is single-use and expires quickly. Use it only for this
         # connection attempt; never persist it beside the durable credential.
-        return _probe(source, _snowflake_url(source, request, include_passcode=True))
-    return _probe(source)
+        health = _probe(source, _snowflake_url(source, request, include_passcode=True))
+    else:
+        health = _probe(source)
+
+    # A green test on an interactive method proves only that a person was here.
+    # The credential Atlas stores has no passcode in it, so the next background
+    # job authenticates with whatever survives — and if nothing does, it fails
+    # minutes into a run rather than here. Say so while the reader is looking.
+    if health.state == "connected" and request.auth_method in INTERACTIVE_AUTH:
+        health = health.model_copy(
+            update={
+                "detail": " ".join(
+                    filter(
+                        None,
+                        [
+                            health.detail,
+                            (
+                                "Connected interactively. Background extraction and analysis "
+                                "run with no one present: this keeps working only while "
+                                "Snowflake honours a cached MFA token, which needs "
+                                "ALLOW_CLIENT_MFA_CACHING on the account and expires on its "
+                                "schedule. Use key-pair or a programmatic token for "
+                                "unattended runs."
+                            ),
+                        ],
+                    )
+                )
+            }
+        )
+    return health
 
 
 @app.delete("/sources/{source_id}/credentials", status_code=204, tags=["sources"])
