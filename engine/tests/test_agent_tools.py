@@ -539,3 +539,44 @@ def test_a_refusal_says_why_it_refused(wired) -> None:
 
     assert len(sink.rejections) == 1
     assert "no such evidence" in sink.rejections[0]
+
+
+def test_a_metric_claim_does_not_count_as_describing_a_column() -> None:
+    """The failure that left four quantity columns with no meaning.
+
+    The model ran a distribution check on each, recorded the result as a
+    `metric` claim, treated the column as handled and moved on. `metric` is not
+    a description, so the catalogue reported "no established meaning yet" — and
+    nothing anywhere said the reading had left them behind.
+    """
+    from atlas.agent import AnalysisSink
+    from atlas.facts import Fact, Provenance, ProvenanceKind
+
+    guess = [Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")]
+    sink = AnalysisSink(
+        facts=[
+            Fact(
+                subject="deliverables.stage",
+                aspect="metric",
+                discriminator="distribution",
+                claim="stage has 5 distinct values with no nulls.",
+                confidence=0.6,
+                provenance=guess,
+            ),
+            Fact(
+                subject="deliverables.id",
+                aspect="semantics",
+                claim="Surrogate primary key for a deliverable.",
+                confidence=0.6,
+                provenance=guess,
+            ),
+        ]
+    )
+
+    table = make_snapshot().table("deliverables")
+    described = {f.subject for f in sink.facts if f.aspect in ("semantics", "unit")}
+    undescribed = [
+        c.name for c in table.columns if f"{table.name}.{c.name}" not in described
+    ]
+
+    assert undescribed == ["stage"], "a distribution is not a meaning"

@@ -48,7 +48,7 @@ against this schema, and reviewed by a human first.
 
 Work bottom-up, in this order:
 
-1. Columns first. Describe every column, one claim each, with no exceptions. A \
+1. Columns first. Every column gets a `semantics` claim, with no exceptions. A \
 description states meaning, unit, and role — not its distribution. Keys, codes \
 and flags are included: what a value identifies, which system issues it, and \
 what someone does with it are business facts that the type and the constraint \
@@ -57,6 +57,14 @@ part identifier that procurement and engineering both quote. Where a column \
 genuinely carries nothing beyond its shape, say that plainly and briefly — but \
 say it, because a column you leave out cannot be told apart from one the \
 analysis failed to reach.
+
+A `metric`, `quality` or `lifecycle` claim about a column is an addition, never \
+a substitute. "allocated_quantity has 12 distinct values ranging from 12 to 900 \
+with no nulls" is a distribution: it says what is in the column and nothing \
+about what the column is for. Recording it leaves that column undescribed, and \
+the catalogue reports it as having no established meaning. Run the distribution \
+check by all means — then use what it showed you to write the `semantics` claim \
+that says what the quantity measures, in what unit, and who acts on it.
 2. Grain next, once you know what the columns are. State exactly what one row \
 represents, in the form "one row per X". This is the single most consequential \
 claim about a table: an agent that has the grain wrong writes silently \
@@ -118,6 +126,10 @@ class AnalysisSink(BaseModel):
     # which is the difference between "the model found nothing" and "the model
     # tried and the gate turned it away".
     rejections: list[str] = Field(default_factory=list)
+    # Columns this reading left without a meaning. A `metric` claim is not a
+    # description, so a column can be worked on and still come back
+    # undescribed — which is invisible unless it is counted here.
+    undescribed: list[str] = Field(default_factory=list)
 
 
 def render_table(
@@ -584,6 +596,30 @@ def analyze_table(
             get_settings().atlas_max_turns,
             len(sink.facts),
         )
+    # Which columns came back without a meaning, and say so out loud.
+    #
+    # A silent version of this is how four quantity columns ended up reported as
+    # having no established meaning: the model ran a distribution check on each,
+    # recorded the result as a `metric` claim, considered the column handled and
+    # moved on. `metric` is not a description, so the catalogue was right to say
+    # nothing was established — but nothing anywhere said the analysis had left
+    # them behind, so the first anyone knew was reading the emitted YAML.
+    described = {
+        fact.subject for fact in sink.facts if fact.aspect in ("semantics", "unit")
+    }
+    sink.undescribed = [
+        column.name
+        for column in table.columns
+        if f"{table.name}.{column.name}" not in described
+    ]
+    if sink.undescribed:
+        logger.warning(
+            "[%s] %d column(s) have no semantics claim: %s",
+            table.name,
+            len(sink.undescribed),
+            ", ".join(sink.undescribed),
+        )
+
     logger.info("[%s] %s", table.name, str(prediction.summary)[:300])
 
     for question in sink.questions:
