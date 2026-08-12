@@ -169,8 +169,8 @@ export function ReviewDiff({
   const stagedCount = Object.keys(staged).length;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         {/* The file header. Grain and table meaning describe the file itself,
             not a line in it, so they stay pinned while the columns scroll. */}
         <header className="sticky top-0 z-10 border-b border-line bg-canvas/95 px-6 py-3 backdrop-blur">
@@ -295,18 +295,19 @@ function Hunk({
 
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-3">
-          <span className="ident text-ink">{row.role}</span>
-          <span className="text-meta text-ink-3">{row.source}</span>
-          {row.claim && (
-            <span className="ml-auto text-meta tabular-nums text-ink-3">
-              {trustPercent(row.claim.confidence)} trust
-            </span>
-          )}
-          {staged && (
-            <span className="ml-auto text-meta font-semibold text-cta">
+          <span className="ident shrink-0 text-ink">{row.role}</span>
+          <span className="min-w-0 truncate text-meta text-ink-3" title={row.source}>
+            {row.source}
+          </span>
+          {staged ? (
+            <span className="ml-auto shrink-0 text-meta font-semibold text-cta">
               {staged.decision === "endorse" ? "staged · endorse" : "staged · dispute"}
             </span>
-          )}
+          ) : row.claim ? (
+            <span className="ml-auto shrink-0 text-meta tabular-nums text-ink-3">
+              {trustPercent(row.claim.confidence)} trust
+            </span>
+          ) : null}
         </div>
 
         {row.samples.length > 0 && (
