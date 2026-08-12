@@ -241,7 +241,11 @@ def analyze(
     regenerate: bool = typer.Option(False, help="Re-analyze tables that already have claims"),
 ) -> None:
     """Run the analysis agent. Skips already-analyzed tables unless --regenerate."""
-    from atlas.agent import analyze_schema  # imported lazily: needs an API key
+    from atlas.agent import (  # imported lazily: needs an API key
+        analyze_schema,
+        completely_described_tables,
+        repair_columns_by_table,
+    )
 
     workspace = _existing(workspace_name)
     with _mutation(workspace):
@@ -250,7 +254,8 @@ def analyze(
         start_generation = manifest.snapshot_generation
         snapshot = workspace.read_current_snapshot()
         existing = workspace.read_facts()
-        analyzed = {f.subject.split(".")[0] for f in existing.facts}
+        analyzed = completely_described_tables(snapshot, existing.facts)
+        repairs = {} if regenerate else repair_columns_by_table(snapshot, existing.facts)
 
         selected = [t.strip() for t in tables.split(",")] if tables else None
         if regenerate:
@@ -266,6 +271,7 @@ def analyze(
             limit,
             tables=selected,
             already_analyzed=set() if regenerate else analyzed,
+            repair_columns=repairs,
         )
 
         # Merge into what is already stored so prior human verdicts survive.

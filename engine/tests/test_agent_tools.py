@@ -264,6 +264,7 @@ def test_the_turn_ceiling_is_reported_not_swallowed(monkeypatch) -> None:
     from atlas import agent
 
     monkeypatch.setattr(agent.dspy, "ReAct", scripted_react("run_grain_check"))
+    monkeypatch.setattr(agent, "_undescribed_columns", lambda table, sink: [])
     sink = agent.analyze_table(ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
     assert sink.truncated is True
     assert sink.trajectory == ["run_grain_check"]
@@ -273,6 +274,7 @@ def test_a_completed_reading_is_not_marked_partial(monkeypatch) -> None:
     from atlas import agent
 
     monkeypatch.setattr(agent.dspy, "ReAct", scripted_react("run_grain_check", "finish"))
+    monkeypatch.setattr(agent, "_undescribed_columns", lambda table, sink: [])
     sink = agent.analyze_table(ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables"))
     assert sink.truncated is False
 
@@ -335,7 +337,7 @@ def test_a_distribution_supports_a_claim_about_its_own_column() -> None:
     )
     assert "Recorded" in result
     fact = sink.facts[0]
-    assert fact.confidence == 0.84  # strong observed support, below authoritative trust
+    assert fact.confidence == 0.96  # weighted evidence score is not capped by observed state
     assert fact.trust is not None
     assert fact.trust.state is Trust.OBSERVED
     assert fact.trust.factors.coverage == 1.0
@@ -541,6 +543,13 @@ def test_a_refusal_says_why_it_refused(wired) -> None:
     assert "no such evidence" in sink.rejections[0]
 
 
+def test_the_every_column_contract_is_applied_to_the_dspy_signature() -> None:
+    from atlas.agent import ReadTable
+
+    assert "Every column gets a `semantics` claim, with no exceptions" in ReadTable.instructions
+    assert "claim about a column is an addition, never" in ReadTable.instructions
+
+
 def test_a_metric_claim_does_not_count_as_describing_a_column() -> None:
     """The failure that left four quantity columns with no meaning.
 
@@ -580,3 +589,146 @@ def test_a_metric_claim_does_not_count_as_describing_a_column() -> None:
     ]
 
     assert undescribed == ["stage"], "a distribution is not a meaning"
+
+
+def test_analyze_table_repairs_columns_omitted_by_the_first_pass(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from atlas import agent
+    from atlas.facts import Fact, Provenance, ProvenanceKind
+
+    captured: dict[str, agent.AnalysisSink] = {}
+    calls = 0
+
+    def fake_tools(adapter, snapshot, sink):
+        captured["sink"] = sink
+        return []
+
+    def fake_react(signature, tools, max_iters):
+        nonlocal calls
+        calls += 1
+        pass_number = calls
+
+        def run(**kwargs):
+            if pass_number == 2:
+                guess = [
+                    Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="repair test")
+                ]
+                captured["sink"].facts.extend(
+                    [
+                        Fact(
+                            subject="deliverables.id",
+                            aspect="semantics",
+                            claim="Identifier.",
+                            confidence=0.6,
+                            provenance=guess,
+                        ),
+                        Fact(
+                            subject="deliverables.stage",
+                            aspect="semantics",
+                            claim="Workflow stage.",
+                            confidence=0.6,
+                            provenance=guess,
+                        ),
+                    ]
+                )
+            return SimpleNamespace(
+                trajectory={"tool_name_0": "finish"}, summary="done"
+            )
+
+        return run
+
+    monkeypatch.setattr(agent, "build_tools", fake_tools)
+    monkeypatch.setattr(agent.dspy, "ReAct", fake_react)
+
+    sink = agent.analyze_table(
+        ScriptedAdapter(), make_snapshot(), make_snapshot().table("deliverables")
+    )
+
+    assert calls == 2
+    assert sink.undescribed == []
+    assert sink.truncated is False
+
+
+def test_a_table_is_complete_only_when_every_column_has_semantics() -> None:
+    from atlas.agent import completely_described_tables
+    from atlas.facts import Fact, Provenance, ProvenanceKind
+
+    guess = [Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")]
+    snapshot = make_snapshot()
+    partial = [
+        Fact(
+            subject="deliverables.id",
+            aspect="semantics",
+            claim="Identifier.",
+            confidence=0.6,
+            provenance=guess,
+        ),
+        Fact(
+            subject="deliverables.stage",
+            aspect="metric",
+            discriminator="distribution",
+            claim="Five observed values.",
+            confidence=0.6,
+            provenance=guess,
+        ),
+    ]
+
+    assert completely_described_tables(snapshot, partial) == set()
+
+    complete = partial + [
+        Fact(
+            subject="deliverables.stage",
+            aspect="semantics",
+            claim="Workflow stage.",
+            confidence=0.6,
+            provenance=guess,
+        )
+    ]
+    assert completely_described_tables(snapshot, complete) == {"deliverables"}
+
+
+def test_a_zero_column_table_is_never_considered_complete() -> None:
+    from atlas.agent import completely_described_tables
+
+    snapshot = Snapshot(
+        database="db",
+        schema_name="public",
+        dialect="postgresql",
+        tables=[Table(schema_name="public", name="reflection_failed", columns=[])],
+    )
+
+    assert completely_described_tables(snapshot, []) == set()
+
+
+def test_partial_prior_reading_requests_only_missing_column_repair(monkeypatch) -> None:
+    from atlas import agent
+    from atlas.facts import Fact, Provenance, ProvenanceKind
+
+    guess = [Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")]
+    facts = [
+        Fact(
+            subject="deliverables.id",
+            aspect="semantics",
+            claim="Identifier.",
+            confidence=0.6,
+            provenance=guess,
+        )
+    ]
+    repairs = agent.repair_columns_by_table(make_snapshot(), facts)
+    received: list[list[str] | None] = []
+
+    def capture(adapter, snapshot, table, relationships=None, repair_columns=None):
+        received.append(repair_columns)
+        return agent.AnalysisSink()
+
+    monkeypatch.setattr(agent, "analyze_table", capture)
+    agent.analyze_schema(
+        ScriptedAdapter(),
+        make_snapshot(),
+        tables=["deliverables"],
+        repair_columns=repairs,
+    )
+
+    assert repairs == {"deliverables": ["stage"]}
+    assert received == [["stage"]]

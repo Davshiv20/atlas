@@ -788,7 +788,13 @@ def extract(name: str, request: ExtractRequest = Body(default=ExtractRequest()))
 @app.post("/workspaces/{name}/analyze", status_code=202, tags=["pipeline"])
 def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest())) -> Job:
     """Run the analysis agent. Minutes per table — always poll the job."""
-    from atlas.agent import AnalysisSink, analyze_schema, select_tables
+    from atlas.agent import (
+        AnalysisSink,
+        analyze_schema,
+        completely_described_tables,
+        repair_columns_by_table,
+        select_tables,
+    )
     from atlas.relationships import as_claims, by_table, discover
 
     workspace = _existing(name)
@@ -814,15 +820,14 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         assert_current()
         snapshot = workspace.read_current_snapshot()
         existing = workspace.read_facts()
-        # A table is analysed when something was *read* about it, not merely
-        # when a claim names it. Relationship discovery writes a join claim for
-        # almost every table in the schema, and counting those made a fresh
-        # workspace look fully analysed: a run with no limit selected one table.
-        analyzed = {
-            f.subject.split(".")[0]
-            for f in existing.facts
-            if f.aspect not in ("join", "class")
-        }
+        # A table is complete only when every physical column has a semantics
+        # claim. Counting any non-join fact as "analyzed" made an early model
+        # finish permanent: the warning named missing columns, but every later
+        # run skipped the table that needed repair.
+        analyzed = completely_described_tables(snapshot, existing.facts)
+        repairs = (
+            {} if request.regenerate else repair_columns_by_table(snapshot, existing.facts)
+        )
 
         selected = select_tables(
             snapshot,
@@ -902,6 +907,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
                 on_table_start=starting,
                 on_table_done=finished,
                 relationships=by_table(discovery),
+                repair_columns=repairs,
                 workers=workers,
             )
         finally:

@@ -586,14 +586,121 @@ def _undescribed_columns(table: Table, sink: AnalysisSink) -> list[str]:
     ]
 
 
+def missing_semantics_by_table(
+    snapshot: Snapshot, facts: list[Fact]
+) -> dict[str, list[str]]:
+    """Physical columns still lacking a semantics claim, grouped by table."""
+    semantic_subjects = {fact.subject for fact in facts if fact.aspect == "semantics"}
+    return {
+        table.name: [
+            column.name
+            for column in table.columns
+            if f"{table.name}.{column.name}" not in semantic_subjects
+        ]
+        for table in snapshot.tables
+    }
+
+
+def completely_described_tables(snapshot: Snapshot, facts: list[Fact]) -> set[str]:
+    """Tables safe to skip because every reflected column has a meaning."""
+    missing = missing_semantics_by_table(snapshot, facts)
+    return {
+        table.name
+        for table in snapshot.tables
+        if table.columns and not missing[table.name]
+    }
+
+
+def repair_columns_by_table(
+    snapshot: Snapshot, facts: list[Fact]
+) -> dict[str, list[str]]:
+    """Incomplete prior readings that need only a focused column repair.
+
+    A fresh table still gets the full table pass. Once any non-relationship
+    claim exists, later runs preserve it and ask only for missing columns.
+    """
+    missing = missing_semantics_by_table(snapshot, facts)
+    prior_tables = {
+        fact.subject.split(".")[0]
+        for fact in facts
+        if fact.aspect not in ("join", "class")
+    }
+    return {
+        table: columns
+        for table, columns in missing.items()
+        if columns and table in prior_tables
+    }
+
+
+def _missing_named_columns(
+    table: Table, sink: AnalysisSink, names: list[str]
+) -> list[str]:
+    described = {fact.subject for fact in sink.facts if fact.aspect == "semantics"}
+    physical = {column.name for column in table.columns}
+    return [
+        name
+        for name in names
+        if name in physical and f"{table.name}.{name}" not in described
+    ]
+
+
+def _repair_columns(
+    snapshot: Snapshot,
+    table: Table,
+    sink: AnalysisSink,
+    tools: list[dspy.Tool],
+    missing: list[str],
+    relationships: list[str] | None,
+) -> list[str]:
+    logger.info(
+        "[%s] completing semantics for %d omitted column(s): %s",
+        table.name,
+        len(missing),
+        ", ".join(missing),
+    )
+    repair = dspy.ReAct(
+        CompleteColumns,
+        tools=tools,
+        max_iters=get_settings().atlas_max_turns,
+    )
+    prediction = repair(
+        table=render_table(snapshot, table, relationships),
+        missing=", ".join(missing),
+        established="\n".join(relationships or []) or "none established",
+    )
+    trajectory = getattr(prediction, "trajectory", {}) or {}
+    calls = [name for key, name in trajectory.items() if key.startswith("tool_name_")]
+    sink.trajectory.extend(calls)
+    return calls
+
+
 def analyze_table(
     adapter: DatabaseAdapter,
     snapshot: Snapshot,
     table: Table,
     relationships: list[str] | None = None,
+    repair_columns: list[str] | None = None,
 ) -> AnalysisSink:
     sink = AnalysisSink()
     tools = build_tools(adapter, snapshot, sink)
+
+    if repair_columns is not None:
+        calls = _repair_columns(
+            snapshot, table, sink, tools, repair_columns, relationships
+        )
+        sink.undescribed = _missing_named_columns(table, sink, repair_columns)
+        sink.truncated = "finish" not in calls or bool(sink.undescribed)
+        if sink.undescribed:
+            logger.warning(
+                "[%s] %d column(s) still have no semantics claim after repair: %s",
+                table.name,
+                len(sink.undescribed),
+                ", ".join(sink.undescribed),
+            )
+        for question in sink.questions:
+            question.table = table.name
+        return sink
+
     agent = dspy.ReAct(
         ReadTable,
         tools=tools,
@@ -627,27 +734,9 @@ def analyze_table(
     # first pass's accepted evidence and claims.
     sink.undescribed = _undescribed_columns(table, sink)
     if sink.undescribed:
-        logger.info(
-            "[%s] completing semantics for %d omitted column(s): %s",
-            table.name,
-            len(sink.undescribed),
-            ", ".join(sink.undescribed),
+        _repair_columns(
+            snapshot, table, sink, tools, sink.undescribed, relationships
         )
-        repair = dspy.ReAct(
-            CompleteColumns,
-            tools=tools,
-            max_iters=get_settings().atlas_max_turns,
-        )
-        repair_prediction = repair(
-            table=render_table(snapshot, table, relationships),
-            missing=", ".join(sink.undescribed),
-            established="\n".join(relationships or []) or "none established",
-        )
-        repair_trajectory = getattr(repair_prediction, "trajectory", {}) or {}
-        repair_calls = [
-            name for key, name in repair_trajectory.items() if key.startswith("tool_name_")
-        ]
-        sink.trajectory.extend(repair_calls)
         sink.undescribed = _undescribed_columns(table, sink)
 
     if sink.undescribed:
@@ -707,6 +796,7 @@ def analyze_schema(
     on_table_start: Callable[[str], None] | None = None,
     on_table_done: Callable[[str, AnalysisSink], None] | None = None,
     relationships: dict[str, list[str]] | None = None,
+    repair_columns: dict[str, list[str]] | None = None,
     workers: int | None = None,
 ) -> tuple[FactStore, QuestionLog, EvidenceStore]:
     """Analyze the selected tables. `limit=None` means every remaining one.
@@ -741,9 +831,14 @@ def analyze_schema(
         with reporting:
             if on_table_start:
                 on_table_start(table.name)
-        sink = analyze_table(
-            adapter, snapshot, table, (relationships or {}).get(table.name)
-        )
+        relationship_context = (relationships or {}).get(table.name)
+        columns_to_repair = (repair_columns or {}).get(table.name)
+        if columns_to_repair is None:
+            sink = analyze_table(adapter, snapshot, table, relationship_context)
+        else:
+            sink = analyze_table(
+                adapter, snapshot, table, relationship_context, columns_to_repair
+            )
         # Persisting is serialised, not the reading. The workspace rewrites
         # whole files and merges claim by claim; two workers landing at once
         # would drop one of them.
