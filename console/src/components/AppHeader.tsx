@@ -31,9 +31,13 @@ export function AppHeader({
     // the toggles onto a second row and shifts the whole toolbar mid-run —
     // which is what a long "Reading …" line did every few seconds.
     <header className="sticky top-0 z-40 flex h-[60px] items-center gap-x-4 border-b border-line bg-surface/85 px-5 backdrop-blur-md">
-      {/* Truncates first. If the header ever runs out of room the title is the
-          least costly thing to lose — clipping the toolbar loses controls. */}
-      <h1 className="display min-w-0 truncate text-title text-ink">Semantic View Generator</h1>
+      {/* Goes first, entirely. The product name is the one thing on this bar a
+          reviewer already knows, and truncating it to "Semantic View G…" spent
+          width on a fragment that says nothing. Below xl it is dropped so the
+          namespace and the controls get the room. */}
+      <h1 className="display hidden shrink-0 truncate text-title text-ink xl:block">
+        Semantic View Generator
+      </h1>
 
       {output && (
         <>
@@ -55,6 +59,8 @@ export function AppHeader({
         </>
       )}
 
+      {/* Stays unshrinkable: losing a control is worse than losing a label, and
+          everything to the left now yields before this has to. */}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {children}
         {job && <GenerationStatus job={job} />}
