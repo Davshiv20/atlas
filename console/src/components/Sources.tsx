@@ -294,6 +294,75 @@ function NewConnectionTile({ onClick }: { onClick: () => void }) {
 }
 
 /** Everything after a connection exists: check it, read it, remove it. */
+/**
+ * What happens, in the order it happens.
+ *
+ * Four controls sit below this: two of them open a connection to the customer's
+ * database, one spends warehouse time reading it, and one throws away work.
+ * None of that was stated anywhere, so the only way to learn what a button did
+ * was to press it.
+ */
+function Stages({ source, hasSnapshot }: { source: SourceStatus; hasSnapshot: boolean }) {
+  const connected = source.health.state === "connected";
+  const stages: { done: boolean; title: string; detail: string }[] = [
+    {
+      done: source.configured,
+      title: "Credentials",
+      detail:
+        "Stored on the engine host and never returned to this screen. Atlas needs " +
+        "SELECT and nothing else — the in-process guards are a second line of " +
+        "defence, not the first.",
+    },
+    {
+      done: connected,
+      title: "Test connection",
+      detail:
+        "Opens one connection and asks the server its version. Reads no table " +
+        "data. Being configured is not the same as being reachable, which is why " +
+        "this is separate.",
+    },
+    {
+      done: hasSnapshot,
+      title: "Read schema",
+      detail:
+        "Reads structure, then profiles every column: row counts, null rates, " +
+        "distinct counts and sample values. This is the step that costs real " +
+        "query time, and on a warehouse it costs money. Nothing is written to " +
+        "your database.",
+    },
+    {
+      done: false,
+      title: "Generate semantic view",
+      detail:
+        "Runs later, from the workspace rather than here. Roughly a minute per " +
+        "table, spends model budget, and executes typed checks against your " +
+        "database to ground what it proposes.",
+    },
+  ];
+
+  return (
+    <ol className="mb-4 flex flex-col gap-2.5 rounded-[--radius-control] border border-line bg-raised px-3 py-2.5">
+      {stages.map((stage) => (
+        <li key={stage.title} className="flex gap-2.5">
+          <span
+            aria-hidden
+            className={`mt-[5px] size-[7px] shrink-0 rounded-full ${
+              stage.done ? "bg-teal" : "bg-line-strong"
+            }`}
+          />
+          <span className="min-w-0">
+            <span className="text-meta font-semibold text-ink">{stage.title}</span>
+            <span className="mt-0.5 block text-meta leading-[16px] text-ink-3">
+              {stage.detail}
+            </span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+
 function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: () => void }) {
   const dispatch = useAppDispatch();
   const selectedWorkspace = useAppSelector((state) => state.ui.workspace);
@@ -319,6 +388,11 @@ function ConfigureModal({ source, onClose }: { source: SourceStatus; onClose: ()
           {source.health.detail}
         </p>
       )}
+
+      {/* What each control does, before it is pressed. Two of the four read the
+          database and one discards work, and none of them said so. */}
+      <Stages source={source} hasSnapshot={Boolean(existingWorkspace?.snapshot_available)} />
+
       <CredentialField source={source} />
 
       <div className="mt-4 flex flex-wrap items-center gap-2">

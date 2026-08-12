@@ -12,6 +12,7 @@ export function AppHeader({
   job,
   busy,
   jobsUnavailable = false,
+  workspaceScoped = true,
   children,
 }: {
   output?: SchemaOutput;
@@ -22,6 +23,11 @@ export function AppHeader({
    *  swallowed: a failing job list looks exactly like an idle workspace, and
    *  it hid a live run once already. */
   jobsUnavailable?: boolean;
+  /** False on screens that belong to no workspace. Connections is a list of
+   *  databases; a claim count, a coverage bar and a Generate button there
+   *  describe some other screen's workspace and invite acting on it from a
+   *  page that is not about it. */
+  workspaceScoped?: boolean;
   children?: React.ReactNode;
 }) {
   const blocked = config !== undefined && !config.api_key_configured;
@@ -31,15 +37,10 @@ export function AppHeader({
     // the toggles onto a second row and shifts the whole toolbar mid-run —
     // which is what a long "Reading …" line did every few seconds.
     <header className="sticky top-0 z-40 flex h-[60px] items-center gap-x-4 border-b border-line bg-surface/85 px-5 backdrop-blur-md">
-      {/* Goes first, entirely. The product name is the one thing on this bar a
-          reviewer already knows, and truncating it to "Semantic View G…" spent
-          width on a fragment that says nothing. Below xl it is dropped so the
-          namespace and the controls get the room. */}
-      <h1 className="display hidden shrink-0 truncate text-title text-ink xl:block">
-        Semantic View Generator
-      </h1>
+      {/* Short enough to always fit, which is why it can stay. */}
+      <h1 className="display shrink-0 truncate text-title text-ink">Atlas</h1>
 
-      {output && (
+      {output && workspaceScoped && (
         <>
           {/* Truncates rather than shrink-0. A Snowflake namespace is long, and
               an unyielding element beside the workspace picker pushed the
@@ -63,14 +64,18 @@ export function AppHeader({
           everything to the left now yields before this has to. */}
       <div className="ml-auto flex shrink-0 items-center gap-3">
         {children}
-        {job && <GenerationStatus job={job} />}
+        {job && workspaceScoped && <GenerationStatus job={job} />}
         {!job && jobsUnavailable && (
           <Badge tone="review" title="GET /jobs failed — a run may be in progress">
             Can't see running jobs
           </Badge>
         )}
-        {output && blocked && <Badge tone="failed">No API key configured</Badge>}
-        {output && <GeneratePanel output={output} busy={busy} disabled={blocked} />}
+        {output && workspaceScoped && blocked && (
+          <Badge tone="failed">No API key configured</Badge>
+        )}
+        {output && workspaceScoped && (
+          <GeneratePanel output={output} busy={busy} disabled={blocked} />
+        )}
       </div>
     </header>
   );

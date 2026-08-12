@@ -110,13 +110,10 @@ export default function App() {
         }
         busy={runningWorkspace === workspace && Boolean(runningJobId)}
         jobsUnavailable={Boolean(jobsError)}
+        workspaceScoped={view !== "sources"}
       >
-        {output && (
-          <>
-            <WorkspacePicker workspaces={workspaces ?? []} />
-            <ViewToggle openQuestions={openQuestions} />
-          </>
-        )}
+        {output && view !== "sources" && <WorkspacePicker workspaces={workspaces ?? []} />}
+        {output && <ViewToggle openQuestions={openQuestions} />}
       </AppHeader>
 
       {view === "sources" ? (
