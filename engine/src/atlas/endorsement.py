@@ -60,7 +60,7 @@ class Endorsement(StrEnum):
     AUTHORED = "authored"
     """A person supplied the meaning themselves — answered, or edited and confirmed."""
 
-    DISPUTED = "disputed"
+    REJECTED = "rejected"
     """A person asserted against it."""
 
     STALE = "stale"
@@ -144,14 +144,14 @@ def endorsement(
 
     if link.relationship is LinkKind.CONTRADICTS or record.verdict is Verdict.FAILED:
         return EndorsementAssessment(
-            state=Endorsement.DISPUTED,
+            state=Endorsement.REJECTED,
             factors=EndorsementFactors(
                 standing=who,
                 specificity=record.observation.get(SPECIFICITY),
                 scope=list(record.observation.get(SAW, [])),
                 corroboration=len(backers),
             ),
-            reasons=[f"disputed by {', '.join(_deciders(record)) or 'a reviewer'}"],
+            reasons=[f"rejected by {', '.join(_deciders(record)) or 'a reviewer'}"],
             decided_at=record.captured_at,
         )
 
@@ -202,24 +202,24 @@ def as_decision_record(
     to remove.
     """
     when = at or datetime.now(UTC)
-    verb = "authored" if authored else "endorsed"
+    verb = "authored" if authored else "approved"
     return EvidenceRecord(
         type=EvidenceType.HUMAN_DECISION,
         authority=Authority.ASSERTED,
         subjects=[subject],
         assertion=Assertion(
-            description=f"{reviewer} {verb if supports else 'disputed'}: {statement.strip()}"
+            description=f"{reviewer} {verb if supports else 'rejected'}: {statement.strip()}"
         ),
         observation={
             "statement": statement,
-            SPECIFICITY: "authored" if authored else "endorsed",
+            SPECIFICITY: "authored" if authored else "approved",
             SAW: sorted(saw),
         },
         # A decision is not a measurement. Claiming a scan would misrepresent
         # where the authority comes from.
         scope=Scope(complete_scan=False),
         verdict=Verdict.PASSED if supports else Verdict.FAILED,
-        reasons=[f"{verb if supports else 'disputed'} by {reviewer}"],
+        reasons=[f"{verb if supports else 'rejected'} by {reviewer}"],
         limitations=[
             "Rests on the reviewer's standing, not on the data.",
             "A later observation can contradict it, and should be recorded when it does.",
@@ -243,7 +243,7 @@ def from_legacy_status(status: str, reviewer: str) -> EndorsementAssessment:
     over: an approval whose grounds are unknown cannot be told it has gone
     stale, and saying so is more useful than inventing a basis for it.
     """
-    state = Endorsement.DISPUTED if status == "rejected" else Endorsement.APPROVED
+    state = Endorsement.REJECTED if status == "rejected" else Endorsement.APPROVED
     return EndorsementAssessment(
         state=state,
         factors=EndorsementFactors(standing=[reviewer], corroboration=1),
@@ -291,6 +291,6 @@ def projected_status(state: Endorsement) -> str:
         Endorsement.AUTO: "auto_accepted",
         Endorsement.APPROVED: "verified",
         Endorsement.AUTHORED: "verified",
-        Endorsement.DISPUTED: "rejected",
+        Endorsement.REJECTED: "rejected",
     }
     return mapping[state]

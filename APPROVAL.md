@@ -84,7 +84,7 @@ is derived from the observations that exist.
 | Verb | Record | Link | Means |
 |---|---|---|---|
 | **answer** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person supplied the meaning |
-| **APPROVE** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person confirmed the proposed meaning |
+| **APPROVE** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person approved the proposed meaning |
 | **REJECT** | `HUMAN_DECISION` · `ASSERTED` · `FAILED` | `CONTRADICTS` | a person asserted against the claim |
 
 The vocabulary already exists — `EvidenceType.HUMAN_DECISION`,
@@ -103,12 +103,12 @@ Derived by an `endorsement()` function taking the same
 |---|---|
 | `NONE` | no human-decision evidence links to this claim |
 | `AUTO` | policy accepted it without a person: grounded, high confidence, routine consequence |
-| `ENDORSED` | a person confirmed meaning the model proposed |
+| `APPROVED` | a person confirmed meaning the model proposed |
 | `AUTHORED` | a person supplied the meaning themselves (answered, or edited then confirmed) |
-| `DISPUTED` | a person asserted against it |
-| `STALE` | endorsed or authored, but the evidence it was decided against has since changed |
+| `REJECTED` | a person asserted against it |
+| `STALE` | approved or authored, but the evidence it was decided against has since changed |
 
-`AUTHORED` and `ENDORSED` are kept apart because they carry different weight. A
+`AUTHORED` and `APPROVED` are kept apart because they carry different weight. A
 person writing the meaning is a stronger claim on their attention than a person
 agreeing with a sentence already on screen.
 
@@ -126,7 +126,7 @@ warns about. So the factors are recorded and reported, and never averaged.
 | Factor | Records |
 |---|---|
 | `standing` | who decided, and on what authority |
-| `specificity` | authored the meaning, or endorsed a proposal |
+| `specificity` | authored the meaning, or approved a proposal |
 | `scope` | what they were shown at the moment they decided |
 | `currency` | whether the evidence underneath has moved since |
 | `corroboration` | one reviewer, or several independently |
@@ -151,7 +151,7 @@ meaning — a changed world does.
 
 ## Rejection
 
-A dispute is human evidence *against* the claim, not a delete. The claim
+A rejection is human evidence *against* the claim, not a delete. The claim
 survives with a `CONTRADICTS` link attached, which is what makes it auditable
 and what lets a later reviewer overturn it by recording their own attestation.
 This satisfies invariant 2 (claims are attributable, reviewable, and versioned)
@@ -166,8 +166,8 @@ stops being a source of truth.
 ```
 NONE, STALE          → unverified
 AUTO                 → auto_accepted
-ENDORSED, AUTHORED   → verified
-DISPUTED             → rejected
+APPROVED, AUTHORED   → verified
+REJECTED             → rejected
 ```
 
 Existing workspaces need a one-time backfill: for every fact carrying a

@@ -215,8 +215,18 @@ class FactStore(BaseModel):
         return [f for f in self.facts if f.status is FactStatus.UNVERIFIED]
 
     def write(self, path: Path) -> None:
+        """Persist the review history — and only that.
+
+        `endorsement` is derived on every read and is deliberately not written.
+        Storing it was the mistake this model exists to remove: a value on disk
+        outlives the code that produced it, so renaming one of its states left
+        every stored workspace unreadable. Derived state has no business in a
+        file that is meant to be the durable record.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(mode="json", exclude_none=True)
+        payload = self.model_dump(
+            mode="json", exclude_none=True, exclude={"facts": {"__all__": {"endorsement"}}}
+        )
         path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
 
     @classmethod

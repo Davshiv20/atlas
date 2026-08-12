@@ -1,7 +1,7 @@
 """Turning a reviewer's decision into evidence.
 
 The sibling of `answers.record_answer`. That one handles a person supplying a
-meaning; this one handles a person endorsing or disputing a meaning already
+meaning; this one handles a person approving or rejecting a meaning already
 proposed. Both write the same kind of record, because they are the same act at
 different specificity — see `APPROVAL.md`.
 
@@ -35,7 +35,7 @@ def record_decision(
     The status that comes back is a projection of what the evidence now says,
     not the `decision` argument echoed: passing `verified` records that a person
     backed the claim, and the state derived from that record may still be
-    `disputed` if someone later disagreed, or `stale` if the ground moved.
+    `rejected` if someone later disagreed, or `stale` if the ground moved.
     """
     supports = decision is not FactStatus.REJECTED
     authored = text is not None and text.strip() != fact.claim
@@ -49,7 +49,7 @@ def record_decision(
         supports=supports,
         # What they were shown. A decision is not part of its own grounds, and
         # neither is anyone else's — otherwise every endorsement would go stale
-        # the moment a second person endorsed the same claim.
+        # the moment a second person approved the same claim.
         saw=observation_ids(before),
         authored=authored,
     )

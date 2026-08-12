@@ -197,7 +197,7 @@ export function ReviewDiff({
         stage(current, "approve");
       } else if (key === "r") {
         event.preventDefault();
-        stage(current, "dispute");
+        stage(current, "reject");
       } else if (key === "e") {
         event.preventDefault();
         setDraft(current.claim?.text ?? current.proposed);
@@ -404,7 +404,7 @@ function Hunk({
           </span>
           {staged ? (
             <span className="ml-auto shrink-0 text-meta font-semibold text-cta">
-              {staged.decision === "approve" ? "staged · endorse" : "staged · dispute"}
+              {staged.decision === "approve" ? "staged · approve" : "staged · reject"}
             </span>
           ) : row.claim ? (
             <span className="ml-auto shrink-0 text-meta tabular-nums text-ink-3">
@@ -491,8 +491,8 @@ function Hunk({
             <button type="button" className="hover:text-ink" onClick={onEdit}>
               <kbd className="font-mono text-ink-3">e</kbd> edit
             </button>
-            <button type="button" className="hover:text-ink" onClick={() => onStage("dispute")}>
-              <kbd className="font-mono text-ink-3">r</kbd> dispute
+            <button type="button" className="hover:text-ink" onClick={() => onStage("reject")}>
+              <kbd className="font-mono text-ink-3">r</kbd> reject
             </button>
             <span className="ml-auto tabular-nums">#{position + 1}</span>
           </p>

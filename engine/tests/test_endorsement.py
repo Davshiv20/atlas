@@ -118,7 +118,7 @@ def test_a_dispute_is_evidence_against_not_a_deletion() -> None:
     )
     pairs = store.for_claim(fact.id)
 
-    assert endorsement(pairs).state is Endorsement.DISPUTED
+    assert endorsement(pairs).state is Endorsement.REJECTED
     assert any(link.relationship is LinkKind.CONTRADICTS for link, _ in pairs)
     assert fact.claim, "the claim survives so a later reviewer can overturn it"
 
@@ -192,7 +192,7 @@ def test_the_latest_decision_wins_but_earlier_ones_are_kept() -> None:
 
     pairs = store.for_claim(fact.id)
     assessment = endorsement(pairs)
-    assert assessment.state is Endorsement.DISPUTED
+    assert assessment.state is Endorsement.REJECTED
     assert set(assessment.factors.standing) == {"ada", "shivam"}
     assert len([r for _, r in pairs if r.type is EvidenceType.HUMAN_DECISION]) == 2
 
@@ -271,3 +271,26 @@ def test_a_decision_record_states_what_it_does_not_establish() -> None:
     )
     assert record.authority is Authority.ASSERTED
     assert any("standing" in limitation for limitation in record.limitations)
+
+
+def test_endorsement_is_never_written_to_disk(tmp_path) -> None:
+    """Derived state must not outlive the code that produced it.
+
+    It was persisted onto the fact, so renaming one of the endorsement states
+    left every stored workspace unreadable — pydantic refused a `facts.yaml`
+    holding a value the enum no longer had. That is the exact failure this model
+    was written to remove, reintroduced one layer down.
+    """
+    from atlas.facts import FactStore
+
+    fact, _ = record_decision(
+        claim(), EvidenceStore(), reviewer="shivam", decision=FactStatus.VERIFIED
+    )
+    assert fact.endorsement is not None, "still derived in memory"
+
+    path = tmp_path / "facts.yaml"
+    FactStore(facts=[fact]).write(path)
+
+    assert "endorsement" not in path.read_text()
+    # And it survives the round trip, because nothing depends on the stored copy.
+    assert FactStore.read(path).facts[0].claim == fact.claim
