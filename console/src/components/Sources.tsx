@@ -138,7 +138,10 @@ function ConnectionCard({
   onConfigure: () => void;
   onOpen: (workspaceId: string) => void;
 }) {
-  const openable = workspaces.find((workspace) => workspace.snapshot_available);
+  const [createWorkspace, { isLoading: creating, error: createError }] =
+    useCreateWorkspaceMutation();
+  const step = nextStep(source, workspaces);
+
   return (
     <article className="flex flex-col rounded-[--radius-panel] border border-line bg-surface p-4">
       <div className="flex items-start gap-3">
@@ -155,19 +158,57 @@ function ConnectionCard({
       {workspaces.length > 0 && (
         <p className="mt-2 text-meta text-ink-3">
           {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"}
-          {openable ? ` · latest generation ${openable.snapshot_generation}` : " · no snapshot yet"}
+          {step.kind === "open" ? ` · latest generation ${step.workspace.snapshot_generation}` : ""}
+        </p>
+      )}
+
+      {/* Say what is missing. A disabled control with no reason beside it is
+          the same dead end whether the cause is a missing credential, a
+          missing workspace or a missing snapshot — and the reader cannot tell
+          which, so they cannot act. */}
+      <p className="mt-2 text-meta text-ink-3">{step.why}</p>
+
+      {createError && (
+        <p className="mt-2 rounded-[--radius-control] border border-red/25 bg-red-soft px-2 py-1 text-meta text-red">
+          {describeError(createError, "Could not create the workspace.")}
         </p>
       )}
 
       <div className="mt-4 flex gap-2 border-t border-line pt-3">
-        <button
-          type="button"
-          onClick={() => openable && onOpen(openable.id)}
-          disabled={!openable}
-          className="rounded-[--radius-control] bg-cta px-2.5 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
-        >
-          Open workspace
-        </button>
+        {step.kind === "open" ? (
+          <button
+            type="button"
+            onClick={() => onOpen(step.workspace.id)}
+            className="rounded-[--radius-control] bg-cta px-2.5 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover"
+          >
+            Open workspace
+          </button>
+        ) : step.kind === "create" ? (
+          <button
+            type="button"
+            disabled={creating}
+            onClick={async () => {
+              const created = await createWorkspace({
+                id: source.id,
+                source_id: source.id,
+              }).unwrap().catch(() => null);
+              // Straight into Configure: the next thing needed is a schema
+              // read, and that is where it lives.
+              if (created) onConfigure();
+            }}
+            className="rounded-[--radius-control] bg-cta px-2.5 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover disabled:bg-raised disabled:text-ink-4"
+          >
+            {creating ? "Creating…" : "Create workspace"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onConfigure}
+            className="rounded-[--radius-control] bg-cta px-2.5 py-1 text-meta font-medium text-cta-ink hover:bg-cta-hover"
+          >
+            {step.kind === "connect" ? "Add credentials" : "Read schema"}
+          </button>
+        )}
         <button
           type="button"
           onClick={onConfigure}
@@ -178,6 +219,42 @@ function ConnectionCard({
       </div>
     </article>
   );
+}
+
+type Step =
+  | { kind: "connect"; why: string }
+  | { kind: "create"; why: string }
+  | { kind: "extract"; why: string }
+  | { kind: "open"; why: string; workspace: WorkspaceSummary };
+
+/**
+ * The one thing this connection needs next.
+ *
+ * A source is a way in; a workspace is a captured snapshot of it. "Open
+ * workspace" opens the second, so it is inert until the first has produced
+ * one — which is correct, and was previously indistinguishable from broken
+ * because the card offered that button and nothing else at every stage.
+ */
+function nextStep(source: SourceStatus, workspaces: WorkspaceSummary[]): Step {
+  const openable = workspaces.find((workspace) => workspace.snapshot_available);
+  if (openable) {
+    return { kind: "open", why: "Ready to review.", workspace: openable };
+  }
+  if (workspaces.length === 0) {
+    return source.health.state === "connected"
+      ? { kind: "create", why: "Connected. No workspace yet — create one to capture this schema." }
+      : {
+          kind: "connect",
+          why: "No workspace yet. Add credentials and test the connection first.",
+        };
+  }
+  if (source.health.state !== "connected") {
+    return {
+      kind: "connect",
+      why: "Workspace exists but nothing has been read yet, and the connection is not verified.",
+    };
+  }
+  return { kind: "extract", why: "Workspace is empty. Read the schema to capture a snapshot." };
 }
 
 /** The mark carries the engine, so a mixed list is scannable at a glance. */
