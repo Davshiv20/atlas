@@ -11,6 +11,13 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.14.2",
     "pyyaml>=6.0",
+    # The `secure-local-storage` extra is what installs `keyring`, and keyring
+    # is what lets the connector persist the MFA token it is already asking
+    # for via `client_request_mfa_token`. Without it a TOTP login authenticates
+    # once and nothing survives: the stored credential carries no passcode, so
+    # every later connection is refused for want of a code no background job
+    # can supply.
+    "snowflake-connector-python[secure-local-storage]>=3.12",
     "snowflake-sqlalchemy>=1.11.0",
     "sqlalchemy>=2.0",
     "typer>=0.15",
