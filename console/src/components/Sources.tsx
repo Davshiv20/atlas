@@ -17,7 +17,7 @@ import {
   useWorkspacesQuery,
 } from "@/store/api";
 import { describeError } from "@/api/errors";
-import { clearWorkspace, selectWorkspace } from "@/store/uiSlice";
+import { clearWorkspace, selectWorkspace, setView } from "@/store/uiSlice";
 import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
@@ -59,7 +59,14 @@ export function Sources() {
                 source={source}
                 workspaces={(workspaces ?? []).filter((workspace) => workspace.source_id === source.id)}
                 onConfigure={() => setConfiguring(source)}
-                onOpen={(workspaceId) => dispatch(selectWorkspace(workspaceId))}
+                onOpen={(workspaceId) => {
+                  // Selecting is not opening. Without the view change the
+                  // screen stayed on Connections, so the button appeared to do
+                  // nothing while the workspace had in fact switched underneath
+                  // it — and whatever was open before still looked current.
+                  dispatch(selectWorkspace(workspaceId));
+                  dispatch(setView("workspace"));
+                }}
               />
             ))}
             <NewConnectionTile onClick={() => setAdding(true)} />

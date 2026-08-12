@@ -121,10 +121,17 @@ export default function App() {
 
       {view === "sources" ? (
         <Sources />
-      ) : !workspace || !output ? (
+      ) : !workspace ? (
         // No catalogue yet: Connections is the screen. Plugging a database in
         // is the first thing, not a checklist that links to it.
         <Sources />
+      ) : outputError ? (
+        <ErrorState message={`The catalogue for ${workspace} could not be loaded.`} />
+      ) : !output ? (
+        // A workspace is chosen and its catalogue is on the way. Falling back
+        // to Connections here made switching workspaces look like the switch
+        // had failed — the screen went back to the list you just left.
+        <LoadingState label={`Opening ${workspace}…`} />
       ) : view === "questions" ? (
         <Questions workspace={workspace} />
       ) : view === "map" ? (
