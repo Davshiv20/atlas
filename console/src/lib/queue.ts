@@ -34,6 +34,7 @@ export interface ReviewRow {
   id: string;
   table: string;
   role: string;
+  kind: "grain" | "description" | "column";
   source: string;
   proposed: string;
   dataType?: string;
@@ -153,6 +154,7 @@ function allRows(table: TableOutput): ReviewRow[] {
     id: table.grain?.id ?? claimId(table.name, "grain"),
     table: table.name,
     role: "Grain",
+    kind: "grain",
     source: table.qualified_name,
     proposed: table.grain?.text ?? "Not established",
     samples: [`${table.row_count.toLocaleString()} rows`],
@@ -167,6 +169,7 @@ function allRows(table: TableOutput): ReviewRow[] {
     id: table.description?.id ?? claimId(table.name, "semantics"),
     table: table.name,
     role: "Table meaning",
+    kind: "description",
     source: table.qualified_name,
     proposed: table.description?.text ?? table.source_comment ?? "Not established",
     samples: [`${table.columns.length} columns`, `${table.row_count.toLocaleString()} rows`],
@@ -190,6 +193,7 @@ function rowForColumn(table: TableOutput, column: ColumnOutput): ReviewRow {
     id: column.description?.id ?? columnClaimId(table.name, column.name),
     table: table.name,
     role: column.name,
+    kind: "column",
     source: columnSummary(column),
     proposed: column.description?.text ?? "No semantic meaning established",
     dataType: column.data_type,
@@ -213,7 +217,13 @@ function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<Revie
   }
 
   if (claim.status !== "unverified") {
-    return { risk: "none", reason: claim.status.replace("_", " ") };
+    return {
+      risk: "none",
+      reason:
+        claim.status === "auto_accepted"
+          ? "routine impact · accepted without human review"
+          : claim.status.replace("_", " "),
+    };
   }
 
   if (claim.trust?.state === "contradicted") {
@@ -227,10 +237,13 @@ function riskFor(claim: Claim | undefined, consequence: Consequence): Pick<Revie
   }
 
   if (highImpact) {
-    return { risk: "yellow", reason: "important claim is not validated" };
+    return {
+      risk: "yellow",
+      reason: `${consequence} impact · human validation required`,
+    };
   }
 
-  return { risk: "none", reason: "routine claim can be left inferred" };
+  return { risk: "none", reason: "routine impact · safe to leave inferred" };
 }
 
 function matchesTable(entry: TableProgress, filter: Filter): boolean {

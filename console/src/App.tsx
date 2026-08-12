@@ -111,8 +111,18 @@ export default function App() {
         busy={runningWorkspace === workspace && Boolean(runningJobId)}
         jobsUnavailable={Boolean(jobsError)}
         workspaceScoped={view !== "sources"}
+        lead={
+          // Gated with the rest of the workspace-scoped header: the popover
+          // carries claim counts and coverage, which describe some other
+          // screen's workspace when read from Connections.
+          //
+          // Keyed on the workspace rather than on its catalogue, so switching
+          // does not make the selector disappear while the next one loads.
+          workspace && view !== "sources" ? (
+            <WorkspacePicker workspaces={workspaces ?? []} output={output} />
+          ) : undefined
+        }
       >
-        {output && view !== "sources" && <WorkspacePicker workspaces={workspaces ?? []} />}
         {output && <ViewToggle openQuestions={openQuestions} />}
       </AppHeader>
 

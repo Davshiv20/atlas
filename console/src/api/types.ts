@@ -32,8 +32,8 @@ export type TrustBand =
   | "weak_signals"
   | "plausible"
   | "strongly_supported"
-  | "highly_trusted"
-  | "authoritative_or_enforced"
+  | "very_strong_evidence"
+  | "exceptionally_strong_evidence"
   | "conflicted";
 
 export interface TrustFactors {
@@ -49,6 +49,8 @@ export interface TrustAssessment {
   state: TrustState;
   confidence: number;
   factors: TrustFactors;
+  /** Exact engine policy weights used for this score. */
+  factor_weights: TrustFactors;
   reasons: string[];
   limitations: string[];
   band: TrustBand;
@@ -357,6 +359,8 @@ export interface Dimension {
   description?: string;
   unique: boolean;
   nullable: boolean;
+  sample_values: SampleValue[];
+  samples_withheld?: string;
   reviewed: boolean;
 }
 
@@ -371,6 +375,8 @@ export interface ViewRelationship {
 export interface Excluded {
   name: string;
   reason: string;
+  sample_values: SampleValue[];
+  samples_withheld?: string;
 }
 
 export interface TableView {

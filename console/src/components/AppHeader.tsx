@@ -1,5 +1,4 @@
 import type { EngineConfig, Job, SchemaOutput } from "@/api/types";
-import { Coverage } from "@/components/Coverage";
 import { GeneratePanel } from "@/components/GeneratePanel";
 import { Badge } from "@/components/StatusBadge";
 import { dismissFinishedJob } from "@/store/uiSlice";
@@ -13,6 +12,7 @@ export function AppHeader({
   busy,
   jobsUnavailable = false,
   workspaceScoped = true,
+  lead,
   children,
 }: {
   output?: SchemaOutput;
@@ -28,6 +28,10 @@ export function AppHeader({
    *  describe some other screen's workspace and invite acting on it from a
    *  page that is not about it. */
   workspaceScoped?: boolean;
+  /** Sits immediately after the title, on the left. The workspace selector
+   *  lives here: which catalogue you are in is the first thing the toolbar
+   *  should say, not the last. */
+  lead?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const blocked = config !== undefined && !config.api_key_configured;
@@ -40,25 +44,10 @@ export function AppHeader({
       {/* Short enough to always fit, which is why it can stay. */}
       <h1 className="display shrink-0 truncate text-title text-ink">Atlas</h1>
 
-      {output && workspaceScoped && (
-        <>
-          {/* Truncates rather than shrink-0. A Snowflake namespace is long, and
-              an unyielding element beside the workspace picker pushed the
-              toolbar off the right edge of the window. */}
-          <span
-            className="ident min-w-0 flex-1 truncate text-ink-2"
-            title={qualifiedSchema(output)}
-          >
-            {qualifiedSchema(output)}
-          </span>
-          <span className="hidden min-w-0 truncate text-meta text-ink-3 lg:block">
-            {output.claim_count} claims · {output.question_count} open questions
-          </span>
-          <div className="hidden shrink-0 xl:block">
-            <Coverage output={output} />
-          </div>
-        </>
-      )}
+      {/* What this workspace contains — the schema, its counts, its coverage —
+          is not header furniture. It hangs off the selector that chose it, so
+          the toolbar carries navigation and the detail is one click away. */}
+      {lead}
 
       {/* Stays unshrinkable: losing a control is worse than losing a label, and
           everything to the left now yields before this has to. */}
@@ -79,20 +68,6 @@ export function AppHeader({
       </div>
     </header>
   );
-}
-
-/**
- * The namespace, said once.
- *
- * Adapters disagree about what `schema_name` holds. Postgres stores a bare
- * `public` and needs the database in front of it; Snowflake stores the whole
- * `DATABASE.SCHEMA`, because that is what its queries have to be qualified
- * with. Prepending unconditionally rendered `POC_DB.POC_DB.TRELLIS_SOURCE`.
- */
-function qualifiedSchema(output: SchemaOutput): string {
-  return output.schema_name.startsWith(`${output.database}.`)
-    ? output.schema_name
-    : `${output.database}.${output.schema_name}`;
 }
 
 /**

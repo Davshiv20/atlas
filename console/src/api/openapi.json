@@ -945,7 +945,7 @@
           "review"
         ],
         "summary": "Review Claim",
-        "description": "Record a human verdict.\n\nVerifying an ungrounded claim is refused: the model invariant forbids it,\nand surfacing that as a 409 is the point \u2014 it is the rule that stops a\nconfident guess from being promoted to fact by a distracted reviewer.",
+        "description": "Record a human verdict, as evidence.\n\nA decision is written to the evidence store and linked to the claim; where\nthe claim now stands is derived from that record, never stored on it. See\n`APPROVAL.md`.\n\nThis no longer refuses an ungrounded claim. The 409 it used to raise existed\nbecause `enforce_grounding_rules` forbids `verified` without an executed\ncheck \u2014 but a human decision *is* grounding (`Fact.is_grounded` accepts\n`ProvenanceKind.HUMAN`), so the condition is not reachable. What the refusal\nprotected against is preserved instead by keeping the states apart: a claim a\ncheck established reads as `verified`, a claim only a person asserted reads\nas `authoritative`, and the emitted view says which.",
         "operationId": "review_claim_workspaces__name__claims__claim_id__review_post",
         "parameters": [
           {
@@ -1263,6 +1263,96 @@
         ],
         "title": "CredentialRequest"
       },
+      "Endorsement": {
+        "type": "string",
+        "enum": [
+          "none",
+          "auto",
+          "approve",
+          "authored",
+          "rejected",
+          "stale"
+        ],
+        "title": "Endorsement",
+        "description": "Answers: where does this claim stand with a human?"
+      },
+      "EndorsementAssessment": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/Endorsement"
+          },
+          "factors": {
+            "$ref": "#/components/schemas/EndorsementFactors"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "decided_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decided At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state",
+          "factors"
+        ],
+        "title": "EndorsementAssessment"
+      },
+      "EndorsementFactors": {
+        "properties": {
+          "standing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Standing"
+          },
+          "specificity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Specificity"
+          },
+          "scope": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope"
+          },
+          "currency": {
+            "type": "number",
+            "title": "Currency",
+            "default": 1.0
+          },
+          "corroboration": {
+            "type": "integer",
+            "title": "Corroboration",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "EndorsementFactors",
+        "description": "Why the state is what it is.\n\nDeliberately not averaged into a score. Trust is continuous because evidence\nvaries in strength; a named person either backed the claim or did not, and a\nweighted mean over \"standing\" and \"corroboration\" would be a number nobody\ncan act on. These qualify the state; they never replace it."
+      },
       "ExtractRequest": {
         "properties": {
           "profile": {
@@ -1305,6 +1395,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/TrustAssessment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "endorsement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EndorsementAssessment"
               },
               {
                 "type": "null"
@@ -1745,6 +1845,7 @@
             "type": "string",
             "enum": [
               "password",
+              "key_pair",
               "mfa_push",
               "mfa_totp",
               "external_browser"
@@ -1779,6 +1880,35 @@
               }
             ],
             "title": "Passcode"
+          },
+          "private_key_file": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Private Key File",
+            "examples": [
+              "/etc/atlas/snowflake_key.p8"
+            ]
+          },
+          "private_key_file_pwd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Private Key File Pwd"
           },
           "warehouse": {
             "type": "string",
@@ -1940,6 +2070,11 @@
           "band": {
             "$ref": "#/components/schemas/TrustBand",
             "readOnly": true
+          },
+          "factor_weights": {
+            "$ref": "#/components/schemas/TrustFactors",
+            "description": "The exact policy weights used, so clients never mirror them.",
+            "readOnly": true
           }
         },
         "type": "object",
@@ -1947,7 +2082,8 @@
           "state",
           "confidence",
           "factors",
-          "band"
+          "band",
+          "factor_weights"
         ],
         "title": "TrustAssessment",
         "description": "Why a claim has its confidence score.\n\nStored with a claim so API clients do not have to reverse-engineer a number\nfrom prose provenance. `confidence` remains duplicated on `Fact` for\nbackwards compatibility and queue ordering; model validation keeps the two\nequal for newly assessed claims."
@@ -1959,8 +2095,8 @@
           "weak_signals",
           "plausible",
           "strongly_supported",
-          "highly_trusted",
-          "authoritative_or_enforced",
+          "very_strong_evidence",
+          "exceptionally_strong_evidence",
           "conflicted"
         ],
         "title": "TrustBand",

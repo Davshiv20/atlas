@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { ClaimStatus, TableOutput } from "@/api/types";
+import type { Claim, ClaimStatus, TableOutput } from "@/api/types";
 import { describeError } from "@/api/errors";
 import { Button } from "@/components/ui/Button";
 import { isGap, needsReview, rowsFor, type ReviewRow } from "@/lib/queue";
@@ -281,12 +281,9 @@ export function ReviewDiff({
             </span>
           </div>
           {analysed ? (
-            <dl className="mt-2 grid grid-cols-[70px_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-meta">
-              <dt className="text-ink-4">grain</dt>
-              <dd className="text-ink-2">{table.grain?.text ?? "not established"}</dd>
-              <dt className="text-ink-4">meaning</dt>
-              <dd className="text-ink-2">{table.description?.text ?? "not established"}</dd>
-            </dl>
+            <p className="mt-1.5 text-meta text-ink-3">
+              Review the table definition first, then scan its {table.columns.length} column meanings.
+            </p>
           ) : (
             <p className="mt-1.5 text-meta text-ink-3">
               Captured, not analysed. The shape below is what Atlas read from the database;
@@ -297,8 +294,12 @@ export function ReviewDiff({
 
         <div className="pb-24">
           {rows.map((row, index) => (
-            <Hunk
-              key={row.id}
+            <div key={row.id}>
+              {row.kind === "grain" && <SectionLabel label="Table definition" />}
+              {row.kind === "column" && rows[index - 1]?.kind !== "column" && (
+                <SectionLabel label={`${table.columns.length} columns`} />
+              )}
+              <Hunk
               row={row}
               staged={staged[row.id]}
               focused={Boolean(current) && current!.id === row.id}
@@ -318,8 +319,9 @@ export function ReviewDiff({
               onCancelEdit={() => setEditing(null)}
               analysed={analysed}
               analysing={analysing}
-              position={index}
-            />
+                position={index}
+              />
+            </div>
           ))}
         </div>
       </div>
@@ -346,6 +348,109 @@ export function ReviewDiff({
         </footer>
       )}
     </div>
+  );
+}
+
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div className="border-b border-line bg-raised px-6 py-1.5 text-meta font-semibold text-ink-3">
+      {label}
+    </div>
+  );
+}
+
+function ClaimState({ row }: { row: ReviewRow }) {
+  const status = row.claim?.status;
+  if (row.risk === "yellow") {
+    return <span className="font-semibold text-amber-strong">Needs review</span>;
+  }
+  if (row.risk === "red") {
+    return <span className="font-semibold text-red">Conflict</span>;
+  }
+  if (status === "verified") {
+    return <span className="font-semibold text-teal-strong">Human confirmed</span>;
+  }
+  if (status === "auto_accepted") {
+    return <span className="font-semibold text-teal-strong">Auto-accepted · routine</span>;
+  }
+  if (status === "rejected") {
+    return <span className="font-semibold text-red">Rejected</span>;
+  }
+  return <span className="font-semibold text-ink-3">Inferred</span>;
+}
+
+const TRUST_FACTORS = [
+  ["Directness", "evidence_directness"],
+  ["Authority", "authority"],
+  ["Coverage", "coverage"],
+  ["Consistency", "consistency"],
+  ["Freshness", "freshness"],
+] as const;
+
+function TrustInfo({ claim }: { claim: Claim }) {
+  const trust = claim.trust;
+  if (!trust) {
+    return (
+      <span
+        className="cursor-help tabular-nums text-ink-3"
+        title="Legacy score without a factor breakdown. Regenerate this table to calculate directness, authority, coverage, consistency, and freshness."
+      >
+        {trustPercent(claim.confidence)} trust ⓘ
+      </span>
+    );
+  }
+
+  const weighted = TRUST_FACTORS.reduce(
+    (sum, [, key]) => sum + trust.factors[key] * trust.factor_weights[key],
+    0,
+  );
+  const safetyLimited = trust.state === "contradicted" || trust.state === "unsupported";
+
+  return (
+    <details className="relative">
+      <summary className="cursor-help list-none tabular-nums text-ink-3 hover:text-ink">
+        {trustPercent(claim.confidence)} trust ⓘ
+      </summary>
+      <div className="absolute right-0 top-6 z-30 w-[310px] rounded-[--radius-panel] border border-line-strong bg-canvas p-3 shadow-lg">
+        <p className="text-meta font-semibold text-ink">How this score was calculated</p>
+        <p className="mt-0.5 text-meta text-ink-3">
+          Weighted evidence factors. Trust state (<b>{trust.state}</b>) describes the kind
+          of support; it does not cap a positive score.
+        </p>
+        <dl className="mt-2 grid grid-cols-[1fr_auto_auto] gap-x-3 gap-y-1 text-meta">
+          {TRUST_FACTORS.map(([label, key]) => (
+            <div key={key} className="col-span-3 grid grid-cols-subgrid">
+              <dt className="text-ink-2">{label}</dt>
+              <dd className="tabular-nums text-ink-3">{Math.round(trust.factors[key] * 100)}</dd>
+              <dd className="tabular-nums text-ink-4">
+                × {Math.round(trust.factor_weights[key] * 100)}%
+              </dd>
+            </div>
+          ))}
+        </dl>
+        <div className="mt-2 border-t border-line pt-2 text-meta">
+          <p className="flex justify-between text-ink-3">
+            <span>Weighted score</span>
+            <span className="tabular-nums">{Math.round(weighted * 100)}</span>
+          </p>
+          {safetyLimited && (
+            <p className="flex justify-between text-red">
+              <span>Safety-limited ({trust.state})</span>
+              <span className="tabular-nums">{trustPercent(claim.confidence)}</span>
+            </p>
+          )}
+          <p className="mt-1 flex justify-between font-semibold text-ink">
+            <span>Final trust</span>
+            <span className="tabular-nums">{trustPercent(claim.confidence)}</span>
+          </p>
+        </div>
+        {trust.limitations.length > 0 && (
+          <p className="mt-2 text-meta text-ink-3">
+            <b>Limits:</b> {trust.limitations.slice(0, 2).join(" · ")}
+          </p>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -383,37 +488,55 @@ function Hunk({
   const mark = markFor(row, staged);
   const decidable = Boolean(row.claim);
   const finding = row.findings[0];
+  const tableLevel = row.kind !== "column";
 
   return (
     <div
       ref={cursorRef}
       onClick={onFocus}
-      className={`grid grid-cols-[2.4ch_minmax(0,1fr)] gap-x-3 border-b border-line/60 px-4 py-2.5 ${
-        focused ? "bg-surface" : ""
-      }`}
+      className={`grid grid-cols-[2.4ch_minmax(0,1fr)] gap-x-3 border-b px-4 ${
+        tableLevel
+          ? "border-line bg-surface/75 py-4"
+          : "border-line/60 py-2.5"
+      } ${focused ? "ring-1 ring-inset ring-line-strong" : ""}`}
     >
-      <span className={`select-none text-center font-mono text-body ${mark.tone}`} aria-hidden>
+      <span
+        className={`select-none text-center font-mono text-body ${mark.tone}`}
+        aria-hidden
+        title={mark.label}
+      >
         {mark.glyph}
       </span>
 
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-3">
-          <span className="ident shrink-0 text-ink">{row.role}</span>
-          <span className="min-w-0 truncate text-meta text-ink-3" title={row.source}>
-            {row.source}
+          <span
+            className={
+              tableLevel
+                ? "text-body font-semibold text-ink"
+                : "ident shrink-0 text-ink"
+            }
+          >
+            {row.role}
           </span>
+          {!tableLevel && (
+            <span className="min-w-0 truncate text-meta text-ink-3" title={row.source}>
+              {row.source}
+            </span>
+          )}
           {staged ? (
             <span className="ml-auto shrink-0 text-meta font-semibold text-cta">
               {staged.decision === "approve" ? "staged · approve" : "staged · reject"}
             </span>
           ) : row.claim ? (
-            <span className="ml-auto shrink-0 text-meta tabular-nums text-ink-3">
-              {trustPercent(row.claim.confidence)} trust
+            <span className="ml-auto flex shrink-0 items-center gap-2 text-meta">
+              <ClaimState row={row} />
+              <TrustInfo claim={row.claim} />
             </span>
           ) : null}
         </div>
 
-        {row.samples.length > 0 && (
+        {!tableLevel && row.samples.length > 0 && (
           <p className="ident mt-1 truncate text-meta text-ink-3" title={row.samples.join("  ")}>
             {row.samples.join("   ")}
           </p>
@@ -447,9 +570,9 @@ function Hunk({
           </div>
         ) : (
           <p
-            className={`mt-1.5 pl-3.5 ${
-              decidable ? "text-body text-ink" : "text-body text-ink-4"
-            }`}
+            className={`mt-1.5 max-w-[95ch] pl-3.5 ${
+              tableLevel ? "text-table leading-6" : "text-body"
+            } ${decidable ? "text-ink" : "text-ink-4"}`}
           >
             <span
               className={`-ml-3.5 mr-1.5 font-mono ${decidable ? "text-teal" : "text-line-strong"}`}
