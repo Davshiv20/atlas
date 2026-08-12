@@ -18,10 +18,9 @@ def asked(subject: str = "deliverables.process_id_ref", aspect: str = "semantics
     )
 
 
-def test_an_answer_is_the_only_thing_that_passes_the_business_ceiling() -> None:
-    """`ClaimPolicy.ceiling` caps semantics at OBSERVED, and the policy's own
-    escape hatch was unreachable: nothing in the product built a human
-    decision, so every semantics claim sat at 0.65 forever."""
+def test_an_answer_gives_business_semantics_authoritative_standing() -> None:
+    """A data-derived semantic inference may score highly, but a human answer
+    is what changes its trust state and endorsement to authoritative/verified."""
     _, evidence, claim = record_answer(
         asked().answered("Four legacy systems feed this field.", "shivam"),
         FactStore(),

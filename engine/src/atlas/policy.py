@@ -57,8 +57,8 @@ class TrustBand(StrEnum):
     WEAK_SIGNALS = "weak_signals"
     PLAUSIBLE = "plausible"
     STRONGLY_SUPPORTED = "strongly_supported"
-    HIGHLY_TRUSTED = "highly_trusted"
-    AUTHORITATIVE_OR_ENFORCED = "authoritative_or_enforced"
+    VERY_STRONG_EVIDENCE = "very_strong_evidence"
+    EXCEPTIONALLY_STRONG_EVIDENCE = "exceptionally_strong_evidence"
     CONFLICTED = "conflicted"
 
 
@@ -94,6 +94,12 @@ class TrustAssessment(BaseModel):
             return TrustBand.CONFLICTED
         return band_for(self.confidence)
 
+    @computed_field
+    @property
+    def factor_weights(self) -> TrustFactors:
+        """The exact policy weights used, so clients never mirror them."""
+        return FACTOR_WEIGHTS
+
 
 # Score composition. These weights are product policy, not statistics; keeping
 # them named and adding to one makes changes reviewable rather than magical.
@@ -105,17 +111,14 @@ FACTOR_WEIGHTS = TrustFactors(
     freshness=0.10,
 )
 
-# State ceilings preserve semantic honesty without collapsing every claim in a
-# state to one hardcoded score. Business meaning can be strongly supported by
-# data but cannot enter the verified/authoritative band without standing.
-STATE_CEILING: dict[Trust, float] = {
+# Contradiction and absence remain low-confidence safety states. Positive trust
+# states do not cap the score: the factorized evidence assessment is allowed to
+# express a strong inference even when its state remains OBSERVED. State still
+# says what kind of evidence stands behind the claim; score says how strong the
+# evidence-derived case is.
+SAFETY_CEILING: dict[Trust, float] = {
     Trust.CONTRADICTED: 0.19,
     Trust.UNSUPPORTED: 0.24,
-    Trust.SIGNAL: 0.49,
-    Trust.OBSERVED: 0.84,
-    Trust.VERIFIED: 0.94,
-    Trust.ENFORCED: 0.99,
-    Trust.AUTHORITATIVE: 1.00,
 }
 
 TRUST_RANK: dict[Trust, int] = {
@@ -155,8 +158,8 @@ def band_for(confidence: float) -> TrustBand:
     if confidence < 0.85:
         return TrustBand.STRONGLY_SUPPORTED
     if confidence < 0.95:
-        return TrustBand.HIGHLY_TRUSTED
-    return TrustBand.AUTHORITATIVE_OR_ENFORCED
+        return TrustBand.VERY_STRONG_EVIDENCE
+    return TrustBand.EXCEPTIONALLY_STRONG_EVIDENCE
 
 
 def _trust_from(record: EvidenceRecord, aspect: str) -> Trust:
@@ -311,7 +314,7 @@ def assess(
         state = Trust.CONTRADICTED if contradicting else Trust.UNSUPPORTED
         return TrustAssessment(
             state=state,
-            confidence=min(_weighted(factors), STATE_CEILING[state]),
+            confidence=min(_weighted(factors), SAFETY_CEILING[state]),
             factors=factors,
             reasons=[
                 f"{len(contradicting)} contradicting observation(s) and no supporting evidence"
@@ -350,7 +353,12 @@ def assess(
         best = ceiling
 
     state = Trust.CONTRADICTED if contradicting else best
-    score = min(_weighted(factors), STATE_CEILING[state])
+    weighted_score = _weighted(factors)
+    score = (
+        min(weighted_score, SAFETY_CEILING[state])
+        if state in SAFETY_CEILING
+        else weighted_score
+    )
 
     if contradicting:
         reasons.insert(

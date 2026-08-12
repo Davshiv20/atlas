@@ -131,7 +131,15 @@ def test_confidence_is_a_factorized_trust_score_not_a_fixed_state_value() -> Non
     assert complete_assessment.confidence > sampled_assessment.confidence
     assert complete_assessment.factors.coverage == 1.0
     assert sampled_assessment.factors.coverage < 0.7
-    assert complete_assessment.band is TrustBand.STRONGLY_SUPPORTED
+    assert complete_assessment.band is TrustBand.VERY_STRONG_EVIDENCE
+    assert complete_assessment.confidence > 0.84, "observed state must not cap the score"
+    assert complete_assessment.factor_weights.model_dump() == {
+        "evidence_directness": 0.30,
+        "authority": 0.25,
+        "coverage": 0.20,
+        "consistency": 0.15,
+        "freshness": 0.10,
+    }
 
 
 def test_stale_evidence_lowers_freshness_and_confidence() -> None:
