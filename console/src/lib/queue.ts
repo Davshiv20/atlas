@@ -61,6 +61,16 @@ export interface Queue {
   tables: TableProgress[];
   needsReview: TableProgress[];
   quiet: TableProgress[];
+  /**
+   * Captured but never analysed.
+   *
+   * Kept out of `tables` so the review filters and their counts stay about
+   * review work — but listed, because they exist. Dropping them left a freshly
+   * extracted schema showing an empty rail beside "Filter 20 tables", which
+   * reads as a failed extract rather than an unstarted analysis. The physical
+   * shape is already known and worth looking at before any claim is made.
+   */
+  notAnalysed: TableProgress[];
 }
 
 export function buildQueue(output: SchemaOutput, filter: Filter = "needs-review"): Queue {
@@ -74,6 +84,12 @@ export function buildQueue(output: SchemaOutput, filter: Filter = "needs-review"
     tables,
     needsReview: tables.filter((entry) => entry.highlighted > 0),
     quiet: tables.filter((entry) => entry.highlighted === 0),
+    // Not filtered by `filter`: these are inventory, not review work, and a
+    // review filter hiding them would recreate the empty rail.
+    notAnalysed: output.tables
+      .filter((table) => !table.analyzed)
+      .map(toProgress)
+      .sort((a, b) => a.table.name.localeCompare(b.table.name)),
   };
 }
 

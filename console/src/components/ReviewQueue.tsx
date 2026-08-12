@@ -187,6 +187,15 @@ function Ledger({
           active={active}
           onSelect={onSelect}
         />
+        {/* Always listed, whatever the filter says. These tables exist — their
+            columns, types and samples are already captured — and hiding them
+            until analysis runs made a full extract look like a failed one. */}
+        <Section
+          label={`Not analysed · ${queue.notAnalysed.length}`}
+          entries={shown(queue.notAnalysed)}
+          active={active}
+          onSelect={onSelect}
+        />
       </div>
     </nav>
   );
@@ -232,8 +241,10 @@ function Section({
                 </span>
               )}
               {/* Outlined, not filled: a gap is an absence, and giving it the
-                  same solid chip as review work makes the two read alike. */}
-              {entry.gaps > 0 && (
+                  same solid chip as review work makes the two read alike.
+                  Suppressed entirely on an unanalysed table, where every field
+                  is a gap and the section heading already says so. */}
+              {entry.gaps > 0 && entry.table.analyzed && (
                 <span
                   title={`${entry.gaps} fields with no generated claim`}
                   className="rounded-full border border-dashed border-line-strong px-1.5 text-badge font-semibold tabular-nums text-ink-3"
