@@ -40,6 +40,8 @@ export function ReviewQueue({
   const [showYaml, setShowYaml] = useState(false);
 
   const queue = useMemo(() => buildQueue(output, filter), [output, filter]);
+  // Nothing analysed is a different screen from nothing outstanding.
+  const analysed = output.tables.filter((candidate) => candidate.analyzed).length;
   const tableName = selectedTable ?? queue.tables[0]?.table.name ?? null;
   const table = output.tables.find((candidate) => candidate.name === tableName) ?? null;
 
@@ -67,6 +69,8 @@ export function ReviewQueue({
                 Scan the sheet. Touch only highlighted rows.
                 <span className="ident ml-2 text-ink">{table.name}</span>
               </>
+            ) : analysed === 0 ? (
+              "not analysed yet"
             ) : (
               "nothing to review"
             )}
@@ -86,6 +90,21 @@ export function ReviewQueue({
           />
         ) : table ? (
           <ReviewSheet table={table} workspace={workspace} />
+        ) : analysed === 0 ? (
+          /* Not the same as an empty queue, and it must not be dressed as one.
+             A green "nothing to review" over a schema nobody has looked at
+             reads as finished work, when in fact no claim has been made about
+             any of these tables. */
+          <div className="m-6 rounded-[--radius-panel] border border-line bg-surface px-5 py-8 text-center">
+            <p className="text-body text-ink">
+              {output.table_count} table{output.table_count === 1 ? "" : "s"} captured. Nothing has
+              been analysed yet, so there is no meaning to review.
+            </p>
+            <p className="mt-1.5 text-meta text-ink-3">
+              Run <span className="font-semibold text-ink-2">Generate semantic view</span> to
+              propose claims. Roughly a minute per table, and it reads your database.
+            </p>
+          </div>
         ) : (
           <p className="m-6 rounded-[--radius-panel] border border-teal/25 bg-teal-soft px-4 py-8 text-center text-body text-teal-strong">
             No highlighted rows. Switch to <span className="font-semibold">All</span> to audit every field.

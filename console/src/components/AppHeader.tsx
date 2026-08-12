@@ -37,8 +37,14 @@ export function AppHeader({
 
       {output && (
         <>
-          <span className="ident shrink-0 text-ink-2">
-            {output.database}.{output.schema_name}
+          {/* Truncates rather than shrink-0. A Snowflake namespace is long, and
+              an unyielding element beside the workspace picker pushed the
+              toolbar off the right edge of the window. */}
+          <span
+            className="ident min-w-0 flex-1 truncate text-ink-2"
+            title={qualifiedSchema(output)}
+          >
+            {qualifiedSchema(output)}
           </span>
           <span className="hidden min-w-0 truncate text-meta text-ink-3 lg:block">
             {output.claim_count} claims · {output.question_count} open questions
@@ -62,6 +68,20 @@ export function AppHeader({
       </div>
     </header>
   );
+}
+
+/**
+ * The namespace, said once.
+ *
+ * Adapters disagree about what `schema_name` holds. Postgres stores a bare
+ * `public` and needs the database in front of it; Snowflake stores the whole
+ * `DATABASE.SCHEMA`, because that is what its queries have to be qualified
+ * with. Prepending unconditionally rendered `POC_DB.POC_DB.TRELLIS_SOURCE`.
+ */
+function qualifiedSchema(output: SchemaOutput): string {
+  return output.schema_name.startsWith(`${output.database}.`)
+    ? output.schema_name
+    : `${output.database}.${output.schema_name}`;
 }
 
 /**
