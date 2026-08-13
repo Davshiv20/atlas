@@ -18,11 +18,16 @@ export function SemanticViewPane({
   workspace,
   table,
   onReview,
+  onClose,
   bordered = true,
 }: {
   workspace: string;
   table: string | null;
   onReview: () => void;
+  /** Given where the pane shares the screen with something it can uncover by
+   *  leaving. Absent where the pane *is* the screen and closing it would
+   *  leave nothing behind. */
+  onClose?: () => void;
   /** False when it fills a pane of its own rather than sitting beside one. */
   bordered?: boolean;
 }) {
@@ -57,6 +62,27 @@ export function SemanticViewPane({
         >
           {copied ? "Copied" : "Copy"}
         </button>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close the semantic view"
+            aria-label="Close the semantic view"
+            className="-mr-1 rounded-[--radius-control] px-1.5 py-1 text-[#8b8b83] hover:text-white"
+          >
+            {/* Drawn rather than a glyph: × renders at a different weight and
+                baseline in every fallback font, and beside a hairline header
+                that shows. */}
+            <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden>
+              <path
+                d="M1 1l9 9M10 1l-9 9"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        )}
       </header>
 
       <div className="min-h-0 flex-1 overflow-auto px-4 py-3">

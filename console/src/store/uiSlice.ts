@@ -21,6 +21,14 @@ export interface UiState {
    */
   finishedJob: Job | null;
   view: "workspace" | "map" | "questions" | "sources";
+  /**
+   * Whether the map's semantic-view panel is open.
+   *
+   * Here rather than in the component because the map unmounts on every view
+   * switch. Closing it to read the graph and finding it reopened on the way
+   * back is the kind of thing that makes a panel feel like it is fighting you.
+   */
+  mapPaneOpen: boolean;
 }
 
 const initialState: UiState = {
@@ -34,6 +42,9 @@ const initialState: UiState = {
   runningWorkspace: null,
   finishedJob: null,
   view: "workspace",
+  // Open to start with: it is the artifact the map exists to explain, and a
+  // panel nobody knows is there is a feature nobody uses.
+  mapPaneOpen: true,
 };
 
 const uiSlice = createSlice({
@@ -79,6 +90,9 @@ const uiSlice = createSlice({
     setView(state, action: PayloadAction<UiState["view"]>) {
       state.view = action.payload;
     },
+    setMapPaneOpen(state, action: PayloadAction<boolean>) {
+      state.mapPaneOpen = action.payload;
+    },
   },
 });
 
@@ -93,5 +107,6 @@ export const {
   finishJob,
   dismissFinishedJob,
   setView,
+  setMapPaneOpen,
 } = uiSlice.actions;
 export default uiSlice.reducer;

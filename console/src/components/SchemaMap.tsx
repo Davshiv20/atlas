@@ -4,7 +4,7 @@ import type { SchemaOutput } from "@/api/types";
 import { layout, type Edge, type Node } from "@/lib/layout";
 import { reviewCounts, reviewState } from "@/lib/review";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
-import { selectTable, setView } from "@/store/uiSlice";
+import { selectTable, setMapPaneOpen, setView } from "@/store/uiSlice";
 import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
@@ -23,12 +23,21 @@ import { useAppDispatch, useAppSelector } from "@/store";
 export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspace: string }) {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((s) => s.ui.table);
+  const paneOpen = useAppSelector((s) => s.ui.mapPaneOpen);
   const graph = useMemo(() => layout(output), [output]);
 
   const ready = output.tables.filter((t) => reviewState(t) === "validated").length;
 
   return (
-    <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_460px] overflow-hidden">
+    // The panel takes a column rather than floating over one. A schema map is
+    // read by following lines between tables, and an overlay hides exactly the
+    // part you are tracing — so closing it gives the canvas back instead of
+    // moving the obstruction somewhere else.
+    <div
+      className={`grid min-h-0 overflow-hidden ${
+        paneOpen ? "grid-cols-[minmax(0,1fr)_460px]" : "grid-cols-[minmax(0,1fr)]"
+      }`}
+    >
       {/* Three layers on purpose. The cards are positioned against the canvas
           so they scroll with the edges they connect to — pinned to the scroll
           container instead, they would sit still while the lines moved. The
@@ -65,14 +74,51 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
         </div>
 
         <Legend ready={ready} total={output.tables.length} />
+
+        {!paneOpen && (
+          <ReopenPane
+            table={selected}
+            onOpen={() => dispatch(setMapPaneOpen(true))}
+          />
+        )}
       </div>
 
-      <SemanticViewPane
-        workspace={workspace}
-        table={selected}
-        onReview={() => dispatch(setView("workspace"))}
-      />
+      {paneOpen && (
+        <SemanticViewPane
+          workspace={workspace}
+          table={selected}
+          onReview={() => dispatch(setView("workspace"))}
+          onClose={() => dispatch(setMapPaneOpen(false))}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * How the closed panel says it is still there.
+ *
+ * It carries the selected table's name, so selecting one while the panel is
+ * shut is not a dead end: the map answers, quietly, that there is something to
+ * open. Auto-opening instead would override a decision the reviewer just made
+ * — they closed it to see the graph.
+ *
+ * Sits opposite the legend, on the edge it would emerge from.
+ */
+function ReopenPane({ table, onOpen }: { table: string | null; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="absolute bottom-4 right-4 z-10 inline-flex max-w-[280px] items-center gap-2 rounded-[--radius-panel] border border-line bg-surface px-3 py-2 text-left hover:border-line-strong"
+    >
+      <span className="ident shrink-0 text-ink-2">semantic_view.yaml</span>
+      {table ? (
+        <span className="ident min-w-0 flex-1 truncate text-ink-3">{table}</span>
+      ) : (
+        <span className="text-meta text-ink-3">closed</span>
+      )}
+    </button>
   );
 }
 
