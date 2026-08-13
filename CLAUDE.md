@@ -66,8 +66,15 @@ store cannot roll back and serializes writers with an advisory `flock` that only
 one host. Both are held to `tests/test_metadata_conformance.py`, which runs one set of
 expectations against each — add a clause there before adding a third store.
 
+Job status follows the same switch through a second port (`atlas/jobs/base.py`): SQLite
+beside the workspaces, or the same PostgreSQL. Deliberately not a separate setting — an
+install with its record in PostgreSQL and its jobs in a local file half-works the moment
+there are two engine processes, and the half that fails decides whether two extracts of
+one workspace may run at once.
+
 Schema changes are Alembic migrations under `engine/migrations/`, never DDL in the
-adapter. `atlas migrate-store` copies workspaces from files into the database.
+adapter. `atlas migrate-store` copies workspaces from files into the database; job history
+is not carried, because it describes runs of a process that has already stopped.
 
 Policy about a workspace lives in `atlas/catalog.py`, not in the store: what may be
 published, what a re-analysed table replaces, what a regeneration may discard. Nothing

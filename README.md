@@ -114,6 +114,13 @@ cd engine && uv run atlas migrate-store   # copy existing workspaces across
 Setting the URL changes where Atlas looks, not where the data is. Without the copy the
 engine comes up on an empty schema and every workspace reads as absent.
 
+Job status follows the same switch — the same database, or a local SQLite file beside the
+workspaces. It is not a separate setting on purpose: an install whose record is in
+PostgreSQL and whose jobs are in a local file half-works as soon as there are two engine
+processes, and the half that fails is the one deciding whether two extracts of a workspace
+may run at once. Job history is not carried across by `migrate-store`; it describes runs of
+a process that has already stopped.
+
 **Files**, when it is not. Inspectable and dependency-free, which is why it is still the
 default, but it rewrites a whole file per edit and its lock is an advisory `flock` that
 only holds within one machine. The layout below is private to that adapter — no caller

@@ -14,6 +14,7 @@ from atlas.jobs import (
     JobRegistry,
     JobStatus,
     ProgressReporter,
+    SqliteJobStore,
     get_registry,
 )
 from atlas.manifest import InvalidWorkspace
@@ -533,7 +534,7 @@ def test_a_running_job_reports_which_table_it_is_on(tmp_path) -> None:
     """A spinner with nothing behind it is what the console had before: the
     reviewer could not tell which of five tables the run was spending minutes
     on, nor how far through it was."""
-    registry = JobRegistry(tmp_path / "jobs.db")
+    registry = JobRegistry(SqliteJobStore(tmp_path / "jobs.db"))
     observed: list[JobProgress] = []
 
     def work(report: ProgressReporter) -> dict:
@@ -565,10 +566,10 @@ def _finish(registry: JobRegistry, job: Job) -> Job:
 def test_a_job_survives_a_restart_of_the_process(tmp_path) -> None:
     """The whole point of leaving memory: a run used to become invisible the
     moment the engine reloaded, so the console showed an idle workspace."""
-    first = JobRegistry(tmp_path / "jobs.db")
+    first = JobRegistry(SqliteJobStore(tmp_path / "jobs.db"))
     job = _finish(first, first.submit("analyze", "demo", lambda report: {"claims": 1}))
 
-    reopened = JobRegistry(tmp_path / "jobs.db")
+    reopened = JobRegistry(SqliteJobStore(tmp_path / "jobs.db"))
     assert reopened.get(job.id).result == {"claims": 1}
     assert [j.id for j in reopened.list("demo")] == [job.id]
 
@@ -576,13 +577,13 @@ def test_a_job_survives_a_restart_of_the_process(tmp_path) -> None:
 def test_an_orphaned_run_is_settled_rather_than_left_running(tmp_path) -> None:
     """A persisted job left at RUNNING is worse than a lost one: its thread died
     with the old process, so the console would poll it forever."""
-    registry = JobRegistry(tmp_path / "jobs.db")
-    # Written directly: there is no public way to produce a job whose worker
-    # died, which is exactly the state a killed process leaves behind.
+    registry = JobRegistry(SqliteJobStore(tmp_path / "jobs.db"))
+    # Written straight to the store: there is no public way to produce a job
+    # whose worker died, which is exactly the state a killed process leaves.
     stuck = Job(id="job_orphan", kind="analyze", workspace="demo", status=JobStatus.RUNNING)
-    registry._insert(stuck)
+    registry.store.insert(stuck, exclusive=False)
 
-    assert JobRegistry(tmp_path / "jobs.db").reconcile() == 1
+    assert JobRegistry(SqliteJobStore(tmp_path / "jobs.db")).reconcile() == 1
 
     settled = registry.get(stuck.id)
     assert settled.status is JobStatus.INTERRUPTED
@@ -591,7 +592,7 @@ def test_an_orphaned_run_is_settled_rather_than_left_running(tmp_path) -> None:
 
 
 def test_a_failing_job_reports_the_message_without_the_traceback(tmp_path) -> None:
-    registry = JobRegistry(tmp_path / "jobs.db")
+    registry = JobRegistry(SqliteJobStore(tmp_path / "jobs.db"))
 
     def work(report: ProgressReporter) -> dict:
         raise RuntimeError("connection refused")
@@ -698,7 +699,7 @@ def test_a_job_row_from_an_older_process_still_loads(tmp_path) -> None:
     import json
     import sqlite3
 
-    from atlas.jobs import SCHEMA
+    from atlas.jobs.sqlite_store import SCHEMA
 
     path = tmp_path / "jobs.db"
     with sqlite3.connect(path) as connection:
@@ -710,7 +711,7 @@ def test_a_job_row_from_an_older_process_still_loads(tmp_path) -> None:
                 (job_id, json.dumps(json.loads(f'{{"message":"m","current":{current}}}'))),
             )
 
-    jobs = {j.id: j for j in JobRegistry(path).list("demo")}
+    jobs = {j.id: j for j in JobRegistry(SqliteJobStore(path)).list("demo")}
 
     assert jobs["job_old"].progress.current == ["invites"]
     assert jobs["job_older"].progress.current == []
