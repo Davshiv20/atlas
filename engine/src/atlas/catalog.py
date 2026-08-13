@@ -27,7 +27,6 @@ from atlas.metadata.base import (
     UnknownWorkspace,
     WorkspaceExists,
 )
-from atlas.output import SchemaOutput
 from atlas.questions import Question, QuestionLog
 from atlas.snapshot import Snapshot
 
@@ -201,11 +200,6 @@ class Catalog:
 
     def write_evidence(self, evidence: EvidenceStore) -> None:
         self.repository.write_evidence(self.name, evidence)
-
-    def export_output(self, output: SchemaOutput) -> None:
-        """Write the projection out. Named `export` because that is all it is:
-        the API rebuilds output per request and nothing reads this back."""
-        self.repository.write_output(self.name, output)
 
     # ---- writing ---------------------------------------------------------
 

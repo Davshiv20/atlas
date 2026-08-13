@@ -108,8 +108,12 @@ caller outside `atlas/metadata/` names a path:
 <workspace>/generations/<n>/facts.yaml
 <workspace>/generations/<n>/evidence.yaml
 <workspace>/generations/<n>/questions.yaml
-<workspace>/generations/<n>/output.yaml
 ```
+
+The catalogue document is not among them. It is derived from the snapshot and
+the claims, rebuilt on every read, and leaves Atlas only when someone exports
+it: `GET /workspaces/<name>/output` for the JSON, `atlas compile <name> --out
+FILE` for YAML on disk at a path you choose.
 
 This inspectable file-backed design supports one trusted Atlas installation with multiple
 independent data sources. It is not a multi-tenant or multi-instance storage model.

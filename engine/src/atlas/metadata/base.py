@@ -45,7 +45,6 @@ from contextlib import contextmanager
 from atlas.evidence import EvidenceStore
 from atlas.facts import FactStore
 from atlas.manifest import WorkspaceManifest
-from atlas.output import SchemaOutput
 from atlas.questions import QuestionLog
 from atlas.snapshot import Snapshot
 
@@ -191,16 +190,12 @@ class MetadataRepository(ABC):
         """Discard claims, questions, evidence, and the projection. Returns
         what was removed, per kind, so a caller can report it."""
 
-    # ---- projection ------------------------------------------------------
-    #
-    # `SchemaOutput` is derived from snapshot plus facts plus evidence, and the
-    # API rebuilds it per request rather than serving what is stored. It is
-    # written as an export — something a person or another tool reads out of
-    # band — which is why there is no `read_output` here: nothing in Atlas may
-    # treat it as a source. Invariant 12.
-
-    @abstractmethod
-    def write_output(self, workspace: str, output: SchemaOutput) -> None: ...
+    # There is deliberately no projection here. `SchemaOutput` is derived from
+    # snapshot plus facts plus evidence and is rebuilt on every read; a stored
+    # copy is a second answer to the same question, and it goes stale the
+    # moment a reviewer approves a claim. Rendering it for export is
+    # `atlas.compile`, and where that text goes is the caller's decision, not
+    # the store's. Invariant 12.
 
     # ---- concurrency -----------------------------------------------------
 

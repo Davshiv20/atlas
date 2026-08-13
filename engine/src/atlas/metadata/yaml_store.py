@@ -42,7 +42,6 @@ from atlas.metadata.base import (
     WorkspaceBusy,
     WorkspaceExists,
 )
-from atlas.output import SchemaOutput
 from atlas.questions import QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Snapshot
@@ -54,12 +53,16 @@ SNAPSHOT = "snapshot.yaml"
 FACTS = "facts.yaml"
 QUESTIONS = "questions.yaml"
 EVIDENCE = "evidence.yaml"
-OUTPUT = "output.yaml"
 LOCK = ".mutation.lock"
+
+#: Written by versions of Atlas that stored the projection. Nothing produces it
+#: now — it is rebuilt on read and exported on request — but installs upgraded
+#: in place still have one, so it is swept rather than left behind.
+STALE_OUTPUT = "output.yaml"
 
 #: Everything a generation directory holds, in the order a person reading the
 #: directory would expect to find it.
-GENERATION_FILES = (SNAPSHOT, FACTS, EVIDENCE, QUESTIONS, OUTPUT)
+GENERATION_FILES = (SNAPSHOT, FACTS, EVIDENCE, QUESTIONS)
 
 
 class YamlMetadataRepository(MetadataRepository):
@@ -109,9 +112,13 @@ class YamlMetadataRepository(MetadataRepository):
         # File presence, not content: an empty facts.yaml is a file some run
         # wrote, and treating it as "nothing here" is how a refresh gets to
         # skip the confirmation that protects review work.
+        #
+        # A stale projection does not count. It is derived, so stranding one
+        # loses nothing a rebuild cannot replace, and letting it block a
+        # refresh made a cache look like review work.
         return any(
             self._active(workspace, name).exists()
-            for name in (FACTS, EVIDENCE, QUESTIONS, OUTPUT)
+            for name in (FACTS, EVIDENCE, QUESTIONS)
         )
 
     def list_workspaces(self) -> list[str]:
@@ -160,7 +167,9 @@ class YamlMetadataRepository(MetadataRepository):
                 staging / SNAPSHOT,
                 snapshot.model_copy(update={"source_id": source_id, "generation": 1}),
             )
-            for filename in (FACTS, EVIDENCE, QUESTIONS, OUTPUT):
+            # The projection is not carried forward. It is derived, and an
+            # adopted workspace rebuilds it on the next read.
+            for filename in (FACTS, EVIDENCE, QUESTIONS):
                 legacy = root / filename
                 if legacy.exists():
                     shutil.copy2(legacy, staging / filename)
@@ -173,7 +182,7 @@ class YamlMetadataRepository(MetadataRepository):
             # The manifest is the single active-generation pointer, and it
             # commits last.
             _write_manifest(self._manifest_path(workspace), manifest)
-            for filename in GENERATION_FILES:
+            for filename in (*GENERATION_FILES, STALE_OUTPUT):
                 legacy = root / filename
                 if legacy.exists():
                     legacy.unlink()
@@ -261,18 +270,16 @@ class YamlMetadataRepository(MetadataRepository):
             ("facts", FACTS),
             ("evidence", EVIDENCE),
             ("questions", QUESTIONS),
-            ("output", OUTPUT),
         ):
             path = self._active(workspace, filename)
             if path.exists():
                 path.unlink()
                 removed[label] = 1
+        # Swept, not counted: a leftover projection is not something the caller
+        # is losing, so reporting it as removed semantic state overstates what
+        # happened.
+        self._active(workspace, STALE_OUTPUT).unlink(missing_ok=True)
         return removed
-
-    # ---- projection ------------------------------------------------------
-
-    def write_output(self, workspace: str, output: SchemaOutput) -> None:
-        _write_output(self._active(workspace, OUTPUT), output)
 
     # ---- concurrency -----------------------------------------------------
 
@@ -408,7 +415,3 @@ def _read_evidence(path: Path) -> EvidenceStore:
 
 def _write_evidence(path: Path, evidence: EvidenceStore) -> None:
     _dump(path, evidence.model_dump(mode="json", exclude_none=True), width=100)
-
-
-def _write_output(path: Path, output: SchemaOutput) -> None:
-    _dump(path, output.model_dump(mode="json", exclude_none=True), width=100)

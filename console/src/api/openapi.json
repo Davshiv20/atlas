@@ -550,51 +550,6 @@
         }
       }
     },
-    "/workspaces/{name}/compile": {
-      "post": {
-        "tags": [
-          "pipeline"
-        ],
-        "summary": "Compile Output",
-        "description": "Rebuild output.yaml from the stored snapshot and claims. Fast; inline.",
-        "operationId": "compile_output_workspaces__name__compile_post",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Compile Output Workspaces  Name  Compile Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/workspaces/{name}/output": {
       "get": {
         "tags": [

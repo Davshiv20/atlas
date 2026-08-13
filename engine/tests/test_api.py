@@ -209,11 +209,34 @@ def test_unknown_claim_is_404(client) -> None:
     assert response.status_code == 404
 
 
-def test_compile_then_read_output(client) -> None:
+def test_output_is_built_from_the_record_with_nothing_compiled_first(client) -> None:
+    """There is no compile step to forget. The catalogue is derived from the
+    stored claims on every read, so a workspace that has never been compiled
+    serves the same document as one that has."""
     seed()
-    assert client.post("/workspaces/demo/compile").json()["tables"] == 1
     output = client.get("/workspaces/demo/output").json()
     assert output["tables"][0]["grain"]["text"] == "One row per order."
+
+
+def test_the_store_keeps_no_projection_and_exporting_writes_where_asked(
+    isolated_settings, tmp_path
+) -> None:
+    """The projection leaves Atlas only when someone asks for it, at a path
+    they choose. Nothing is written back into the record."""
+    import yaml
+    from typer.testing import CliRunner
+
+    from atlas.cli import app as cli_app
+
+    seed()
+    target = tmp_path / "exports" / "demo.yaml"
+    result = CliRunner().invoke(cli_app, ["compile", "demo", "--out", str(target)])
+
+    assert result.exit_code == 0, result.output
+    exported = yaml.safe_load(target.read_text())
+    assert exported["tables"][0]["grain"]["text"] == "One row per order."
+    # And the store is untouched: no output.yaml appeared anywhere under it.
+    assert list((isolated_settings / "demo").rglob("output.yaml")) == []
 
 
 def test_analyze_requires_an_api_key(client, monkeypatch) -> None:

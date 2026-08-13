@@ -294,37 +294,47 @@ def analyze(
 @app.command()
 def compile(
     workspace_name: str = typer.Argument(..., help="Workspace name"),
+    out: Path = typer.Option(None, help="Write the document as YAML to this path"),
     markdown: Path = typer.Option(None, help="Also render a Markdown view for review"),
     limit: int = typer.Option(None, help="Markdown view only: the N most relevant tables"),
 ) -> None:
-    """Rebuild the output document from the stored snapshot and claims.
+    """Build the output document from the stored snapshot and claims, and
+    optionally export it.
 
-    Output is derived, never edited: corrections belong on the claim they came
-    from, so that regenerating can never lose them.
+    Atlas keeps no copy. The document is derived from the record, so it is
+    rebuilt whenever anything asks for it and an exported file is a snapshot of
+    one moment — stale as soon as the next claim is reviewed. Corrections
+    belong on the claim they came from, never on an export.
+
+    With neither --out nor --markdown this only reports what the record
+    currently produces, which is a useful check on its own.
     """
-    from atlas.compile import render_markdown
+    from atlas.compile import render_markdown, render_yaml
     from atlas.output import build_output
 
     workspace = _existing(workspace_name)
-    with _mutation(workspace):
-        document = build_output(
-            workspace.snapshot(),
-            workspace.facts(),
-            workspace.questions().questions,
-            workspace.evidence(),
-        )
-        workspace.export_output(document)
-        described = sum(1 for t in document.tables if t.description)
-        with_grain = sum(1 for t in document.tables if t.grain)
-        typer.echo(
-            f"{document.table_count} tables ({described} described, "
-            f"{with_grain} with grain) -> {workspace.name}"
-        )
+    document = build_output(
+        workspace.snapshot(),
+        workspace.facts(),
+        workspace.questions().questions,
+        workspace.evidence(),
+    )
+    described = sum(1 for t in document.tables if t.description)
+    with_grain = sum(1 for t in document.tables if t.grain)
+    typer.echo(
+        f"{document.table_count} tables ({described} described, {with_grain} with grain)"
+    )
 
-        if markdown:
-            markdown.parent.mkdir(parents=True, exist_ok=True)
-            markdown.write_text(render_markdown(document, limit))
-            typer.echo(f"markdown view -> {markdown}")
+    if out:
+        _export(out, render_yaml(document))
+    if markdown:
+        _export(markdown, render_markdown(document, limit))
+
+
+def _export(target: Path, text: str) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    typer.echo(f"exported -> {target}")
 
 
 @app.command()

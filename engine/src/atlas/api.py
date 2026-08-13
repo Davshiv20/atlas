@@ -919,19 +919,11 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         finally:
             adapter.close()
 
-        # Each table was persisted as it finished, so the export reads what is
-        # stored rather than what this run happened to accumulate.
-        report(
-            JobProgress(message="Compiling output", tables=planned, completed=list(done))
-        )
+        # Nothing is compiled here. Each table was persisted as it finished and
+        # the catalogue is built from the record on every read, so there is no
+        # projection left to write at the end of a run. The last check is that
+        # the workspace this run wrote to is still the one it started on.
         assert_current()
-        document = build_output(
-            snapshot,
-            workspace.facts(),
-            workspace.questions().questions,
-            workspace.evidence(),
-        )
-        workspace.export_output(document)
         return {
             "claims": len(store.facts),
             "questions": len(questions.questions),
@@ -949,13 +941,11 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
     return _submit_mutation("analyze", workspace, manifest, work)
 
 
-@app.post("/workspaces/{name}/compile", tags=["pipeline"])
-def compile_output(name: str, _guard: None = Depends(_workspace_write_guard)) -> dict:
-    """Rebuild output.yaml from the stored snapshot and claims. Fast; inline."""
-    workspace = _existing(name)
-    document = _build(workspace)
-    workspace.export_output(document)
-    return {"tables": document.table_count, "claims": document.claim_count}
+# There is no `compile` endpoint. It existed to write output.yaml into the
+# store, and the store no longer keeps a projection — `GET /output` builds one
+# from the record on every request, so there was nothing left for it to do.
+# Exporting the document to a file is `atlas compile --out`, where the caller
+# names the path, which a server has no way to do.
 
 
 def _build(workspace: Catalog) -> SchemaOutput:

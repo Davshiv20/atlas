@@ -458,8 +458,11 @@ def test_second_workspace_mutation_is_rejected_while_first_is_active(client, mon
     second = client.post("/workspaces/pg-review/extract", json={})
     assert second.status_code == 409
     assert second.json()["detail"]["job_id"] == first.json()["id"]
-    compile_response = client.post("/workspaces/pg-review/compile")
-    assert compile_response.status_code == 409
+    review = client.post(
+        "/workspaces/pg-review/claims/orders%23grain/review",
+        json={"decision": "verified", "reviewer": "shivam"},
+    )
+    assert review.status_code == 409
     delete_response = client.delete("/workspaces/pg-review")
     assert delete_response.status_code == 409
 

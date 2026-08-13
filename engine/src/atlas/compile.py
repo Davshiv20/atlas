@@ -1,14 +1,29 @@
-"""Markdown rendering of the output document, for human review.
+"""Rendering the output document for export — YAML for machines, Markdown for
+people.
 
-`output.yaml` is the artifact; this is a view of it. Rendering from the same
-`SchemaOutput` the YAML serializes means the two can never disagree about what
-was claimed.
+Both are views of one `SchemaOutput`, so the two can never disagree about what
+was claimed. Neither is a store: these return text, and the caller decides
+where it goes. Atlas keeps no copy — the projection is rebuilt from the record
+on every read, and a stored copy is a second answer that goes stale the moment
+a reviewer approves anything.
 """
 
 from __future__ import annotations
 
+import yaml
+
 from atlas.facts import FactStatus
 from atlas.output import Claim, ColumnOutput, SchemaOutput, TableOutput
+
+
+def render_yaml(output: SchemaOutput) -> str:
+    """The document as YAML. An export artifact, never read back by Atlas."""
+    return yaml.safe_dump(
+        output.model_dump(mode="json", exclude_none=True),
+        sort_keys=False,
+        allow_unicode=True,
+        width=100,
+    )
 
 MAX_SAMPLE_VALUES = 8
 
