@@ -3,8 +3,9 @@ import { useMemo } from "react";
 import type { SchemaOutput } from "@/api/types";
 import { layout, type Edge, type Node } from "@/lib/layout";
 import { reviewCounts, reviewState } from "@/lib/review";
+import { JoinReview } from "@/components/JoinReview";
 import { SemanticViewPane } from "@/components/SemanticViewPane";
-import { selectTable, setMapPaneOpen, setView } from "@/store/uiSlice";
+import { selectEdge, selectTable, setMapPaneOpen, setView } from "@/store/uiSlice";
 import { useAppDispatch, useAppSelector } from "@/store";
 
 /**
@@ -23,8 +24,14 @@ import { useAppDispatch, useAppSelector } from "@/store";
 export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspace: string }) {
   const dispatch = useAppDispatch();
   const selected = useAppSelector((s) => s.ui.table);
+  const selectedEdge = useAppSelector((s) => s.ui.edge);
   const paneOpen = useAppSelector((s) => s.ui.mapPaneOpen);
   const graph = useMemo(() => layout(output), [output]);
+
+  const edge = graph.edges.find((candidate) => candidate.id === selectedEdge);
+  // Both ends of a selected relationship light up. The claim is about the pair,
+  // so highlighting one of them would be a picture of half the question.
+  const lit = edge ? [edge.from, edge.to] : selected ? [selected] : [];
 
   const ready = output.tables.filter((t) => reviewState(t) === "validated").length;
 
@@ -49,13 +56,23 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
               role="img"
               aria-label="Schema relationship map"
             >
-              {graph.edges.map((edge) => (
-                <Connector
-                  key={`${edge.from}-${edge.via}-${edge.to}`}
-                  edge={edge}
-                  selected={selected}
-                />
-              ))}
+              {/* Unenforced edges are painted last, so they sit on top.
+                  Two tables joined twice are routed down the same corridor and
+                  their click targets overlap — aiming at the dashed line
+                  selected the solid one running beside it. Where a click is
+                  contested, the reviewable claim should win it: an enforced
+                  key has nothing to decide. */}
+              {[...graph.edges]
+                .sort((a, b) => Number(b.enforced) - Number(a.enforced))
+                .map((candidate) => (
+                  <Connector
+                    key={candidate.id}
+                    edge={candidate}
+                    lit={lit}
+                    selected={candidate.id === selectedEdge}
+                    onSelect={() => dispatch(selectEdge(candidate.id))}
+                  />
+                ))}
             </svg>
 
             {graph.nodes.map((node) => (
@@ -63,6 +80,7 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
                 key={node.table.name}
                 node={node}
                 selected={node.table.name === selected}
+                lit={lit.includes(node.table.name)}
                 onSelect={() => dispatch(selectTable(node.table.name))}
               />
             ))}
@@ -95,12 +113,21 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
         }`}
       >
         <div className="flex h-full w-[460px]">
-          <SemanticViewPane
-            workspace={workspace}
-            table={selected}
-            onReview={() => dispatch(setView("workspace"))}
-            onClose={() => dispatch(setMapPaneOpen(false))}
-          />
+          {edge ? (
+            <JoinReview
+              edge={edge}
+              workspace={workspace}
+              onClose={() => dispatch(selectEdge(null))}
+              onSettled={() => dispatch(selectEdge(null))}
+            />
+          ) : (
+            <SemanticViewPane
+              workspace={workspace}
+              table={selected}
+              onReview={() => dispatch(setView("workspace"))}
+              onClose={() => dispatch(setMapPaneOpen(false))}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -165,10 +192,14 @@ const EDGE_STATE = {
 function TableCard({
   node,
   selected,
+  lit,
   onSelect,
 }: {
   node: Node;
   selected: boolean;
+  /** An end of the relationship under review. Marked, but not as a selection —
+   *  the reviewer chose the line, not this. */
+  lit: boolean;
   onSelect: () => void;
 }) {
   const table = node.table;
@@ -186,7 +217,9 @@ function TableCard({
       } ${
         selected
           ? "border-x-line-ink border-b-line-ink ring-2 ring-focus"
-          : "border-x-line border-b-line hover:border-x-line-strong hover:border-b-line-strong"
+          : lit
+            ? "border-x-line-ink border-b-line-ink"
+            : "border-x-line border-b-line hover:border-x-line-strong hover:border-b-line-strong"
       }`}
     >
       <span className="flex w-full items-baseline gap-2">
@@ -214,23 +247,60 @@ function TableCard({
   );
 }
 
-function Connector({ edge, selected }: { edge: Edge; selected: string | null }) {
-  const touched = selected === edge.from || selected === edge.to;
+/**
+ * A relationship, and a place to click on it.
+ *
+ * Two paths for one line. The visible one is a hairline, which is unclickable
+ * by any honest measure — a 1px diagonal target is a test of aim, not an
+ * affordance. The transparent one underneath is 14px wide and takes the
+ * pointer, so the line can be selected without being drawn thick enough to
+ * clutter a map of forty of them.
+ */
+function Connector({
+  edge,
+  lit,
+  selected,
+  onSelect,
+}: {
+  edge: Edge;
+  lit: string[];
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const touched = selected || lit.includes(edge.from) || lit.includes(edge.to);
   const path = edge.points.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
-    <path
-      d={path}
-      fill="none"
-      stroke={touched ? "var(--color-line-ink)" : "var(--color-line-strong)"}
-      strokeWidth={touched ? 1.5 : 1}
-      // Dashed where the database does not enforce it: a verified join and a
-      // guaranteed one are not the same promise, and the map is the one place
-      // that difference is visible at a glance.
-      strokeDasharray={edge.enforced ? undefined : "4 3"}
-    >
-      <title>{`${edge.from}.${edge.via} → ${edge.to}`}</title>
-    </path>
+    <g className="cursor-pointer">
+      <path
+        d={path}
+        fill="none"
+        stroke={selected ? "var(--color-violet)" : touched ? "var(--color-line-ink)" : "var(--color-line-strong)"}
+        strokeWidth={selected ? 2 : touched ? 1.5 : 1}
+        // Dashed where the database does not enforce it: a verified join and a
+        // guaranteed one are not the same promise, and the map is the one place
+        // that difference is visible at a glance.
+        strokeDasharray={edge.enforced ? undefined : "4 3"}
+      />
+      <path
+        d={path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={14}
+        onClick={onSelect}
+        role="button"
+        tabIndex={0}
+        aria-label={`Review the relationship ${edge.from}.${edge.via} to ${edge.to}`}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
+      >
+        <title>{`${edge.from}.${edge.via} → ${edge.to}${edge.enforced ? " (enforced)" : ""}`}</title>
+      </path>
+    </g>
   );
 }
 

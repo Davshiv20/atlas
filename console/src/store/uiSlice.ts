@@ -29,6 +29,15 @@ export interface UiState {
    * back is the kind of thing that makes a panel feel like it is fighting you.
    */
   mapPaneOpen: boolean;
+  /**
+   * The relationship under review on the map, by edge id.
+   *
+   * Separate from `table` because they are different questions. A table
+   * selection asks what an agent would be given for it; an edge selection asks
+   * whether this relationship is real — and only one of them can be answered
+   * by looking at a picture.
+   */
+  edge: string | null;
 }
 
 const initialState: UiState = {
@@ -45,6 +54,7 @@ const initialState: UiState = {
   // Open to start with: it is the artifact the map exists to explain, and a
   // panel nobody knows is there is a feature nobody uses.
   mapPaneOpen: true,
+  edge: null,
 };
 
 const uiSlice = createSlice({
@@ -54,13 +64,25 @@ const uiSlice = createSlice({
     selectWorkspace(state, action: PayloadAction<string>) {
       state.workspace = action.payload;
       state.table = null;
+      state.edge = null;
     },
     clearWorkspace(state) {
       state.workspace = null;
       state.table = null;
+      state.edge = null;
     },
     selectTable(state, action: PayloadAction<string | null>) {
       state.table = action.payload;
+      // The panel shows one thing at a time, and leaving a stale edge selected
+      // means the map highlights a relationship nobody asked about.
+      state.edge = null;
+    },
+    selectEdge(state, action: PayloadAction<string | null>) {
+      state.edge = action.payload;
+      if (action.payload) state.table = null;
+      // Opening a relationship with the panel shut would settle the claim
+      // somewhere the reviewer cannot see it.
+      if (action.payload) state.mapPaneOpen = true;
     },
     setSearch(state, action: PayloadAction<string>) {
       state.search = action.payload;
@@ -108,5 +130,6 @@ export const {
   dismissFinishedJob,
   setView,
   setMapPaneOpen,
+  selectEdge,
 } = uiSlice.actions;
 export default uiSlice.reducer;

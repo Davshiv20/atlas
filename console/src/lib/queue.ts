@@ -26,7 +26,7 @@ export interface QueueItem {
   id: string;
   table: string;
   label: string;
-  kind: "grain" | "description" | "column";
+  kind: "grain" | "description" | "column" | "join";
   claim: Claim;
 }
 
@@ -34,7 +34,7 @@ export interface ReviewRow {
   id: string;
   table: string;
   role: string;
-  kind: "grain" | "description" | "column";
+  kind: "grain" | "description" | "column" | "join";
   source: string;
   proposed: string;
   dataType?: string;

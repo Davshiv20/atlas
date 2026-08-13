@@ -1,4 +1,4 @@
-import type { SchemaOutput, TableOutput } from "@/api/types";
+import type { Claim, SchemaOutput, TableOutput } from "@/api/types";
 
 /**
  * Layered layout for the schema map.
@@ -27,11 +27,23 @@ export interface Node {
 }
 
 export interface Edge {
+  /** Stable across renders, so a selected edge survives a refetch. */
+  id: string;
   from: string;
   to: string;
   /** The column on the source side, so an edge can be read without a click. */
   via: string;
+  /** What it points at on the far side. Needed to state the join in full.  */
+  referredColumns: string[];
   enforced: boolean;
+  /**
+   * The claim describing this relationship, where one exists.
+   *
+   * Carried onto the edge because the map is where a join is legible: the
+   * queue can only render it as a sentence, and a sentence about two tables is
+   * the one claim shape a reader cannot check by reading.
+   */
+  claim: Claim | undefined;
   points: { x: number; y: number }[];
 }
 
@@ -56,10 +68,13 @@ export function layout(output: SchemaOutput): Graph {
     table.joins
       .filter((join) => join.referred_table && byName.has(join.referred_table))
       .map((join) => ({
+        id: `${table.name}.${join.columns.join("_")}->${join.referred_table}`,
         from: table.name,
         to: join.referred_table!,
         via: join.columns[0] ?? "",
+        referredColumns: join.referred_columns,
         enforced: join.enforced,
+        claim: join.description,
       })),
   );
 

@@ -83,7 +83,11 @@ export function ClaimCard({
   }, [editing, verifiable, submit]);
 
   return (
-    <article className="rounded-[--radius-panel] border border-line bg-surface p-5">
+    // A container query, not a viewport one. This card is 900px wide in the
+    // review queue and 428px in the map's relationship panel, and `sm:` reads
+    // the window either way — so the five trust factors laid out five-across
+    // inside the panel and clipped their own numbers mid-digit.
+    <article className="@container rounded-[--radius-panel] border border-line bg-surface p-5">
       <header className="flex flex-wrap items-center gap-2">
         <span className="ident text-table text-ink">{item.table}</span>
         <span className="text-body text-ink-3">{item.label}</span>
@@ -121,7 +125,7 @@ export function ClaimCard({
         <p className="mt-3 text-table text-ink">{item.claim.text}</p>
       )}
 
-      <div className="mt-4 grid gap-4 sm:grid-cols-[minmax(0,1fr)_200px]">
+      <div className="mt-4 grid gap-4 @md:grid-cols-[minmax(0,1fr)_200px]">
         <div>
           <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">Evidence</p>
           {item.claim.evidence ? (
@@ -228,7 +232,7 @@ function TrustBreakdown({
       <p className="text-meta font-semibold uppercase tracking-wide text-ink-3">
         Trust score factors
       </p>
-      <div className="mt-2 grid gap-2 sm:grid-cols-5">
+      <div className="mt-2 grid gap-2 grid-cols-2 @xl:grid-cols-5">
         {entries.map(([name, value]) => (
           <div key={name} className="rounded-[--radius-control] bg-raised px-2.5 py-2">
             <div className="flex items-center justify-between gap-2 text-meta text-ink-3">
