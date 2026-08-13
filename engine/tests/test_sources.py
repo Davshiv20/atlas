@@ -438,15 +438,16 @@ def test_forgetting_a_credential_clears_it(client, isolated, monkeypatch) -> Non
 def test_an_exported_variable_wins_over_the_stored_one(isolated, monkeypatch) -> None:
     """Someone who exported a variable at the shell meant it; silently
     overriding it would make the engine disagree with its operator."""
-    from atlas.secrets import load_into_environment, set_secret
+    from atlas.secrets import EnvFileSecretStore
 
     path = isolated / ".secrets.env"
     monkeypatch.setenv("ATLAS_SECRETS_FILE", str(path))
     get_settings.cache_clear()
 
-    set_secret("SOME_DB_URL", "postgresql://stored", path)
+    store = EnvFileSecretStore(path)
+    store.set("SOME_DB_URL", "postgresql://stored")
     monkeypatch.setenv("SOME_DB_URL", "postgresql://exported")
-    load_into_environment(path)
+    store.load_into_environment()
 
     assert os.environ["SOME_DB_URL"] == "postgresql://exported"
 

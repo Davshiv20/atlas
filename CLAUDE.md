@@ -77,6 +77,13 @@ source never holds a credential in any store — only the *name* of the environm
 its URL is read from — and there is a conformance clause asserting that, because moving
 declarations into a database must not quietly change it.
 
+Credentials are the one store that deliberately did **not** follow the record into
+PostgreSQL (`atlas/secrets/base.py` says why: a credential in Atlas's own database is a
+credential in every backup and replica of it, and what it unlocks is a customer's
+warehouse). `ATLAS_SECRET_STORE` picks the plaintext `0600` file or the OS keychain;
+`atlas migrate-secrets` moves them. The port has no `get` — a store can be asked to make a
+credential live or whether it holds one, never to hand it over.
+
 Schema changes are Alembic migrations under `engine/migrations/`, never DDL in the
 adapter. `atlas migrate-store` copies workspaces from files into the database; job history
 is not carried, because it describes runs of a process that has already stopped.

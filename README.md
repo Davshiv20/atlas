@@ -126,6 +126,13 @@ URL is read from, never the URL, so the table is exactly as safe to read as the 
 replaces. Credentials are not carried by `migrate-store` at all: they stay in
 `.secrets.env` or the environment, which is where they belong.
 
+Credentials do not move with any of this, on purpose. `ATLAS_SECRET_STORE` chooses between
+the plaintext `0600` file and the OS keychain, and `atlas migrate-secrets --to keyring`
+moves them; there is no database option, because a connection string in Atlas's own
+PostgreSQL is a connection string in every backup and replica of it. For a shared
+deployment, put authentication in front of the API and a real secret manager behind the
+port.
+
 **Files**, when it is not. Inspectable and dependency-free, which is why it is still the
 default, but it rewrites a whole file per edit and its lock is an advisory `flock` that
 only holds within one machine. The layout below is private to that adapter — no caller

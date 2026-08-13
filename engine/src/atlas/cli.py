@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -301,6 +302,59 @@ def migrate_store(
             "Credentials are not carried: they stay in .secrets.env or the "
             "environment, which is where they belong."
         )
+
+
+@app.command()
+def migrate_secrets(
+    to: str = typer.Option("keyring", help="Destination store: keyring or file"),
+    dry_run: bool = typer.Option(False, help="Report what would move, write nothing"),
+) -> None:
+    """Move stored connection strings between credential stores.
+
+    Changing `ATLAS_SECRET_STORE` changes where Atlas looks. Without this the
+    engine comes up holding nothing, every source reads as unconfigured, and
+    the credentials are still sitting in the store you switched away from.
+
+    A move, not a copy — the opposite of `migrate-store`. Leaving a plaintext
+    copy behind after deliberately choosing the keychain would defeat the point
+    of choosing it.
+    """
+    from atlas.secrets.env_file import EnvFileSecretStore
+    from atlas.secrets.keyring_store import KeyringSecretStore
+
+    if to not in {"keyring", "file"}:
+        raise typer.BadParameter("--to must be 'keyring' or 'file'")
+    source, target = (
+        (EnvFileSecretStore(), KeyringSecretStore())
+        if to == "keyring"
+        else (KeyringSecretStore(), EnvFileSecretStore())
+    )
+
+    names = source.names()
+    if not names:
+        typer.echo(f"nothing stored in the {'file' if to == 'keyring' else 'keychain'} store")
+        return
+
+    for name in names:
+        if dry_run:
+            typer.echo(f"{name}\tWOULD MOVE")
+            continue
+        # Read through the environment rather than through a `get`: the port
+        # deliberately has none, so a credential never becomes a value a caller
+        # is holding and might log.
+        source.load_into_environment()
+        value = os.environ.get(name)
+        if not value:
+            typer.echo(f"{name}\tSKIPPED\tno value to move")
+            continue
+        target.set(name, value)
+        source.clear(name)
+        typer.echo(f"{name}\tMOVED")
+
+    if dry_run:
+        typer.echo("\nnothing was written; rerun without --dry-run")
+    else:
+        typer.echo(f"\nset ATLAS_SECRET_STORE={to} so the engine reads them")
 
 
 @app.command()

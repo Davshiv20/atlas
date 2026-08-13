@@ -64,8 +64,17 @@ class Settings(BaseSettings):
     atlas_sources_file: Path = Path("sources.yaml")
 
     # Connection strings written from the UI. Plaintext, 0600, gitignored —
-    # see secrets.py for why that is not sufficient outside localhost.
+    # see atlas/secrets/env_file.py for why that is not sufficient outside
+    # localhost.
     atlas_secrets_file: Path = Path(".secrets.env")
+
+    # Where those connection strings are kept: the file above, or the operating
+    # system's keychain. Deliberately not tied to ATLAS_DATABASE_URL — a
+    # credential in Atlas's own database is a credential in every backup of it.
+    #
+    # Defaults to the file because it is the only one that works on a headless
+    # host. "keyring" is a statement about the machine, so it is chosen.
+    atlas_secret_store: Literal["file", "keyring"] = "file"
 
     # The built console, served by this process in a deployment so there is one
     # origin and no CORS. Absent in local development, where Vite serves the

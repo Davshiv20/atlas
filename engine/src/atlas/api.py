@@ -42,7 +42,7 @@ from atlas.manifest import InvalidWorkspace, WorkspaceManifest
 from atlas.metadata import WorkspaceBusy
 from atlas.output import SchemaOutput, assess_facts, build_output
 from atlas.questions import Question
-from atlas.secrets import clear_secret, has_secret, load_into_environment, set_secret
+from atlas.secrets import get_secret_store
 from atlas.semantic_view import build_semantic_view, render_yaml
 from atlas.settings import get_settings
 from atlas.sources import (
@@ -63,7 +63,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     leaks real credentials into anything that merely imports the app — tests
     included.
     """
-    loaded = load_into_environment()
+    loaded = get_secret_store().load_into_environment()
     if loaded:
         logger.info("loaded %d stored credential(s)", loaded)
     # Any job still marked running belongs to a process that is gone. Settling
@@ -347,7 +347,7 @@ def _status(source: Source) -> SourceStatus:
     return SourceStatus(
         **source.model_dump(),
         configured=source.configured,
-        managed=has_secret(source.url_env),
+        managed=get_secret_store().has(source.url_env),
         health=_health.get(source.id, ConnectionHealth()),
     )
 
@@ -524,7 +524,7 @@ def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHea
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
 
-    set_secret(source.url_env, request.url.strip())
+    get_secret_store().set(source.url_env, request.url.strip())
     return _probe(source)
 
 
@@ -546,7 +546,7 @@ def set_snowflake_credentials(
         raise HTTPException(status_code=409, detail="source is not a Snowflake connection")
 
     stored_url = _snowflake_url(source, request)
-    set_secret(source.url_env, stored_url)
+    get_secret_store().set(source.url_env, stored_url)
     if request.auth_method == "mfa_totp":
         # A TOTP code is single-use and expires quickly. Use it only for this
         # connection attempt; never persist it beside the durable credential.
@@ -588,7 +588,7 @@ def forget_credentials(source_id: str) -> None:
         source = get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
-    clear_secret(source.url_env)
+    get_secret_store().clear(source.url_env)
     _health.pop(source_id, None)
 
 
