@@ -33,17 +33,13 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
     // read by following lines between tables, and an overlay hides exactly the
     // part you are tracing — so closing it gives the canvas back instead of
     // moving the obstruction somewhere else.
-    <div
-      className={`grid min-h-0 overflow-hidden ${
-        paneOpen ? "grid-cols-[minmax(0,1fr)_460px]" : "grid-cols-[minmax(0,1fr)]"
-      }`}
-    >
+    <div className="flex min-h-0 overflow-hidden">
       {/* Three layers on purpose. The cards are positioned against the canvas
           so they scroll with the edges they connect to — pinned to the scroll
           container instead, they would sit still while the lines moved. The
           legend stays with the viewport, which is the one thing that should
           not scroll away. */}
-      <div className="relative min-h-0 min-w-0 overflow-hidden">
+      <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
         <div className="h-full w-full overflow-auto bg-canvas [background-image:radial-gradient(var(--color-line)_1px,transparent_1px)] [background-size:24px_24px]">
           <div className="relative" style={{ width: graph.width, height: graph.height }}>
             <svg
@@ -75,22 +71,38 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
 
         <Legend ready={ready} total={output.tables.length} />
 
-        {!paneOpen && (
-          <ReopenPane
-            table={selected}
-            onOpen={() => dispatch(setMapPaneOpen(true))}
-          />
-        )}
+        <ReopenPane
+          table={selected}
+          hidden={paneOpen}
+          onOpen={() => dispatch(setMapPaneOpen(true))}
+        />
       </div>
 
-      {paneOpen && (
-        <SemanticViewPane
-          workspace={workspace}
-          table={selected}
-          onReview={() => dispatch(setView("workspace"))}
-          onClose={() => dispatch(setMapPaneOpen(false))}
-        />
-      )}
+      {/* Two elements, and both are load-bearing. The outer one animates from
+          460 to 0 and clips; the inner one stays 460 wide the whole way, so the
+          YAML slides out under the edge instead of reflowing narrower and
+          narrower as it goes. Rewrapping text mid-animation is what makes a
+          panel look like it is being crushed rather than put away.
+
+          Width rather than a grid track: `grid-template-columns` interpolates
+          in current Chrome and not everywhere else, and a transition that
+          silently degrades to a snap in one browser is the one thing this
+          change exists to remove. */}
+      <div
+        aria-hidden={!paneOpen}
+        className={`min-h-0 shrink-0 overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none ${
+          paneOpen ? "w-[460px]" : "w-0"
+        }`}
+      >
+        <div className="flex h-full w-[460px]">
+          <SemanticViewPane
+            workspace={workspace}
+            table={selected}
+            onReview={() => dispatch(setView("workspace"))}
+            onClose={() => dispatch(setMapPaneOpen(false))}
+          />
+        </div>
+      </div>
     </div>
   );
 }
@@ -103,14 +115,35 @@ export function SchemaMap({ output, workspace }: { output: SchemaOutput; workspa
  * open. Auto-opening instead would override a decision the reviewer just made
  * — they closed it to see the graph.
  *
- * Sits opposite the legend, on the edge it would emerge from.
+ * Sits opposite the legend, on the edge it would emerge from, and crosses that
+ * edge as it arrives: it slides in from where the panel just left rather than
+ * appearing on top of it half-closed.
+ *
+ * Kept mounted while the panel is open rather than removed, because a control
+ * that is added to the DOM at the end of an animation cannot be part of it.
  */
-function ReopenPane({ table, onOpen }: { table: string | null; onOpen: () => void }) {
+function ReopenPane({
+  table,
+  hidden,
+  onOpen,
+}: {
+  table: string | null;
+  hidden: boolean;
+  onOpen: () => void;
+}) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="absolute bottom-4 right-4 z-10 inline-flex max-w-[280px] items-center gap-2 rounded-[--radius-panel] border border-line bg-surface px-3 py-2 text-left hover:border-line-strong"
+      tabIndex={hidden ? -1 : undefined}
+      aria-hidden={hidden}
+      // `translate`, not `transform`: Tailwind v4 compiles `translate-x-*` to
+      // the standalone `translate` property, so a transition naming `transform`
+      // matches nothing and the slide snaps. Confirmed in the browser —
+      // computed `transform` was `none` while `translate` was `12px`.
+      className={`absolute bottom-4 right-4 z-10 inline-flex max-w-[280px] items-center gap-2 rounded-[--radius-panel] border border-line bg-surface px-3 py-2 text-left transition-[opacity,translate] duration-200 ease-out hover:border-line-strong motion-reduce:transition-none ${
+        hidden ? "pointer-events-none translate-x-3 opacity-0" : "translate-x-0 opacity-100"
+      }`}
     >
       <span className="ident shrink-0 text-ink-2">semantic_view.yaml</span>
       {table ? (
