@@ -49,8 +49,7 @@ from atlas.sources import (
     DuplicateSource,
     Source,
     SourceNotFound,
-    SourceRegistry,
-    source_registry_lock,
+    get_source_repository,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,9 +163,9 @@ def _ensure_manifest(workspace: Catalog) -> WorkspaceManifest:
                 "refusing ambiguous legacy migration"
             ),
         )
-    with source_registry_lock():
+    with get_source_repository().lock():
         try:
-            SourceRegistry.read().get(snapshot.source_id)
+            get_source_repository().get(snapshot.source_id)
         except SourceNotFound as exc:
             raise HTTPException(
                 status_code=409,
@@ -191,7 +190,7 @@ def _ensure_current(workspace: Catalog) -> None:
 def _bound_source(workspace: Catalog) -> Source:
     manifest = _ensure_manifest(workspace)
     try:
-        return SourceRegistry.read().get(manifest.source_id)
+        return get_source_repository().get(manifest.source_id)
     except SourceNotFound as exc:
         raise HTTPException(
             status_code=409,
@@ -411,18 +410,15 @@ def _probe(source: Source, connection_url: str | None = None) -> ConnectionHealt
 
 @app.get("/sources", tags=["sources"])
 def list_sources() -> dict[str, list[SourceStatus]]:
-    return {"sources": [_status(s) for s in SourceRegistry.read().sources]}
+    return {"sources": [_status(s) for s in get_source_repository().list()]}
 
 
 @app.post("/sources", status_code=201, tags=["sources"])
 def create_source(source: Source) -> SourceStatus:
-    with source_registry_lock():
-        registry = SourceRegistry.read()
-        try:
-            registry.add(source)
-        except DuplicateSource as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        registry.write()
+    try:
+        get_source_repository().add(source)
+    except DuplicateSource as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     # Probe on creation: the answer to "did that work" belongs in the response
     # to the action, not behind a second button the user has to know to press.
     _probe(source)
@@ -524,7 +520,7 @@ def set_credentials(source_id: str, request: CredentialRequest) -> ConnectionHea
     restart between saving a credential and finding out whether it works.
     """
     try:
-        source = SourceRegistry.read().get(source_id)
+        source = get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
 
@@ -543,7 +539,7 @@ def set_snowflake_credentials(
     the existing engine-side secret store, and never returned by the API.
     """
     try:
-        source = SourceRegistry.read().get(source_id)
+        source = get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
     if source.adapter != "snowflake":
@@ -589,7 +585,7 @@ def set_snowflake_credentials(
 @app.delete("/sources/{source_id}/credentials", status_code=204, tags=["sources"])
 def forget_credentials(source_id: str) -> None:
     try:
-        source = SourceRegistry.read().get(source_id)
+        source = get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
     clear_secret(source.url_env)
@@ -598,7 +594,11 @@ def forget_credentials(source_id: str) -> None:
 
 @app.delete("/sources/{source_id}", status_code=204, tags=["sources"])
 def delete_source(source_id: str) -> None:
-    with source_registry_lock():
+    sources = get_source_repository()
+    # One lock over both halves. Between "nothing references this" and the
+    # delete, a workspace can be created that binds to it — and the workspace
+    # would come back pointing at a source that no longer exists.
+    with sources.lock():
         referenced = referencing_source(source_id)
         if referenced:
             raise HTTPException(
@@ -608,12 +608,10 @@ def delete_source(source_id: str) -> None:
                     "workspaces": referenced,
                 },
             )
-        registry = SourceRegistry.read()
         try:
-            registry.remove(source_id)
+            sources.remove(source_id)
         except SourceNotFound as exc:
             raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
-        registry.write()
 
 
 @app.post("/sources/{source_id}/test", tags=["sources"])
@@ -624,7 +622,7 @@ def test_source(source_id: str) -> ConnectionHealth:
     answer before the user moves on.
     """
     try:
-        source = SourceRegistry.read().get(source_id)
+        source = get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise HTTPException(status_code=404, detail=f"no source {source_id!r}") from exc
     return _probe(source)
@@ -652,7 +650,7 @@ def _workspace_summary(name: str) -> WorkspaceSummary:
         _ensure_current(workspace)
         snapshot = workspace.unchecked_snapshot()
     try:
-        source = SourceRegistry.read().get(manifest.source_id)
+        source = get_source_repository().get(manifest.source_id)
     except SourceNotFound:
         return WorkspaceSummary(
             id=name,
@@ -683,9 +681,9 @@ def _workspace_summary(name: str) -> WorkspaceSummary:
 
 @app.post("/workspaces", status_code=201, tags=["workspaces"])
 def create_workspace(request: CreateWorkspaceRequest) -> WorkspaceSummary:
-    with source_registry_lock():
+    with get_source_repository().lock():
         try:
-            SourceRegistry.read().get(request.source_id)
+            get_source_repository().get(request.source_id)
         except SourceNotFound as exc:
             raise HTTPException(status_code=404, detail=f"no source {request.source_id!r}") from exc
         referenced = referencing_source(request.source_id)

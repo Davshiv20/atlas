@@ -10,7 +10,7 @@ from sqlalchemy.engine import make_url
 from atlas import api
 from atlas.api import app
 from atlas.settings import get_settings
-from atlas.sources import Source, SourceRegistry
+from atlas.sources import Source, get_source_repository
 
 
 @pytest.fixture(autouse=True)
@@ -127,11 +127,9 @@ def test_deleting_an_unknown_source_is_404(client) -> None:
     assert client.delete("/sources/nope").status_code == 404
 
 
-def test_registry_round_trips(isolated) -> None:
-    registry = SourceRegistry()
-    registry.add(Source(**VALID))
-    registry.write()
-    assert SourceRegistry.read().get("elara").url_env == "ELARA_DATABASE_URL"
+def test_a_declared_source_survives_a_round_trip(isolated) -> None:
+    get_source_repository().add(Source(**VALID))
+    assert get_source_repository().get("elara").url_env == "ELARA_DATABASE_URL"
 
 
 # --- connected is checked, not assumed -------------------------------------

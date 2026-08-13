@@ -527,6 +527,9 @@ def test_migrating_the_store_carries_a_workspace_across_whole(tmp_path, monkeypa
 
     from atlas.cli import app as cli_app
     from atlas.settings import get_settings
+    from atlas.sources import Source
+    from atlas.sources.postgres_store import PostgresSourceRepository
+    from atlas.sources.yaml_store import YamlSourceRepository
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ATLAS_OUTPUT_DIR", str(tmp_path))
@@ -534,6 +537,9 @@ def test_migrating_the_store_carries_a_workspace_across_whole(tmp_path, monkeypa
     get_settings.cache_clear()
     database = _postgres(tmp_path)
     try:
+        YamlSourceRepository(tmp_path / "sources.yaml").add(
+            Source(id="shop", adapter="postgresql", url_env="SHOP_URL")
+        )
         files = YamlMetadataRepository(tmp_path)
         files.create("demo", WorkspaceManifest(id="demo", source_id="shop"))
         files.publish_snapshot("demo", snapshot("orders"))
@@ -561,6 +567,10 @@ def test_migrating_the_store_carries_a_workspace_across_whole(tmp_path, monkeypa
 
         result = CliRunner().invoke(cli_app, ["migrate-store"])
         assert result.exit_code == 0, result.output
+
+        # The source came across too. A workspace whose source the database has
+        # never heard of is one nothing can open.
+        assert PostgresSourceRepository(DATABASE_URL).get("shop").url_env == "SHOP_URL"
 
         carried = database.read_manifest("demo")
         assert carried.snapshot_generation == original.snapshot_generation == 2
@@ -600,7 +610,7 @@ def test_the_api_serves_a_workspace_that_lives_in_postgres(tmp_path, monkeypatch
     from atlas.jobs import get_registry
     from atlas.metadata.registry import reset_repositories
     from atlas.settings import get_settings
-    from atlas.sources import Source, SourceRegistry
+    from atlas.sources import Source, get_source_repository
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ATLAS_OUTPUT_DIR", str(tmp_path))
@@ -610,9 +620,9 @@ def test_the_api_serves_a_workspace_that_lives_in_postgres(tmp_path, monkeypatch
     reset_repositories()
     try:
         _postgres(tmp_path).dispose()
-        SourceRegistry(
-            sources=[Source(id="shop", adapter="postgresql", url_env="SHOP_URL")]
-        ).write()
+        get_source_repository().add(
+            Source(id="shop", adapter="postgresql", url_env="SHOP_URL")
+        )
         client = TestClient(app)
 
         assert client.post(

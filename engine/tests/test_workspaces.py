@@ -16,7 +16,7 @@ from atlas.metadata import yaml_store
 from atlas.metadata.yaml_store import YamlMetadataRepository
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
-from atlas.sources import Source, SourceRegistry
+from atlas.sources import Source, get_source_repository
 
 
 @pytest.fixture(autouse=True)
@@ -38,12 +38,9 @@ def client() -> TestClient:
 
 
 def declare_sources() -> None:
-    SourceRegistry(
-        sources=[
-            Source(id="pg", adapter="postgresql", url_env="PG_URL", namespace="public"),
-            Source(id="sf", adapter="snowflake", url_env="SF_URL", namespace="DB.SCHEMA"),
-        ]
-    ).write()
+    sources = get_source_repository()
+    sources.add(Source(id="pg", adapter="postgresql", url_env="PG_URL", namespace="public"))
+    sources.add(Source(id="sf", adapter="snowflake", url_env="SF_URL", namespace="DB.SCHEMA"))
 
 
 def table(name: str, schema: str) -> Table:
@@ -385,7 +382,7 @@ def test_source_delete_is_blocked_while_workspace_references_it(client) -> None:
 
     assert client.delete("/workspaces/pg-review").status_code == 204
     assert client.delete("/sources/pg").status_code == 204
-    assert SourceRegistry.read().get("sf").id == "sf"
+    assert get_source_repository().get("sf").id == "sf"
 
 
 def test_source_delete_and_workspace_create_are_serialized(client, monkeypatch) -> None:

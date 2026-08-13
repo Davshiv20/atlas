@@ -12,7 +12,7 @@ from atlas.catalog import Catalog, WorkspaceConflict, list_workspaces, referenci
 from atlas.jobs import get_registry
 from atlas.manifest import InvalidWorkspace, WorkspaceManifest
 from atlas.metadata import WorkspaceBusy
-from atlas.sources import Source, SourceNotFound, SourceRegistry, source_registry_lock
+from atlas.sources import Source, SourceNotFound, get_source_repository
 
 app = typer.Typer(help="Grounded schema catalogue generator", no_args_is_help=True)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -49,9 +49,9 @@ def _ensure_manifest(workspace: Catalog) -> WorkspaceManifest:
         raise typer.BadParameter(
             f"workspace {workspace.name!r} has no manifest and no snapshot.source_id; refusing migration"
         )
-    with source_registry_lock():
+    with get_source_repository().lock():
         try:
-            SourceRegistry.read().get(snapshot.source_id)
+            get_source_repository().get(snapshot.source_id)
         except SourceNotFound as exc:
             raise typer.BadParameter(
                 f"workspace {workspace.name!r} references missing source {snapshot.source_id!r}"
@@ -64,7 +64,7 @@ def _ensure_manifest(workspace: Catalog) -> WorkspaceManifest:
 
 def _source(source_id: str) -> Source:
     try:
-        return SourceRegistry.read().get(source_id)
+        return get_source_repository().get(source_id)
     except SourceNotFound as exc:
         raise typer.BadParameter(f"no source {source_id!r}") from exc
 
@@ -99,7 +99,7 @@ def create_workspace(
     source_id: str = typer.Argument(..., help="Declared source id to bind immutably"),
 ) -> None:
     """Create a workspace manifest bound to one source."""
-    with source_registry_lock():
+    with get_source_repository().lock():
         _source(source_id)
         referenced = referencing_source(source_id)
         if referenced and workspace_name not in referenced:
@@ -198,7 +198,7 @@ def workspaces() -> None:
 def migrate_store(
     dry_run: bool = typer.Option(False, help="Report what would move, write nothing"),
 ) -> None:
-    """Copy every workspace from the file store into the database one.
+    """Copy the declared sources and every workspace into the database store.
 
     Setting `ATLAS_DATABASE_URL` changes where Atlas looks, not where the data
     is. Without this the engine comes up pointed at an empty schema and every
@@ -211,12 +211,31 @@ def migrate_store(
     from atlas.metadata.postgres_store import PostgresMetadataRepository
     from atlas.metadata.yaml_store import YamlMetadataRepository
     from atlas.settings import get_settings
+    from atlas.sources.postgres_store import PostgresSourceRepository
+    from atlas.sources.yaml_store import YamlSourceRepository
 
     url = get_settings().atlas_database_url
     if url is None:
         raise typer.BadParameter(
             "ATLAS_DATABASE_URL is not set, so there is no database to migrate into"
         )
+
+    # Sources first, and not only for tidiness: a workspace names the source it
+    # is bound to, and one carried across into a database that has never heard
+    # of that source is a workspace nothing can open.
+    declared = YamlSourceRepository().list()
+    target_sources = PostgresSourceRepository(url)
+    known = {s.id for s in target_sources.list()}
+    for source in declared:
+        if source.id in known:
+            typer.echo(f"source {source.id}\tSKIPPED\talready declared")
+        elif dry_run:
+            typer.echo(f"source {source.id}\tWOULD COPY\t{source.adapter} via {source.url_env}")
+        else:
+            target_sources.add(source)
+            typer.echo(f"source {source.id}\tCOPIED\t{source.adapter} via {source.url_env}")
+    if not declared:
+        typer.echo("no declared sources in the file store")
 
     files = YamlMetadataRepository()
     database = PostgresMetadataRepository(url)
@@ -277,7 +296,11 @@ def migrate_store(
     if dry_run:
         typer.echo("\nnothing was written; rerun without --dry-run")
     else:
-        typer.echo("\nfiles left in place; unset ATLAS_DATABASE_URL to go back to them")
+        typer.echo(
+            "\nfiles left in place; unset ATLAS_DATABASE_URL to go back to them. "
+            "Credentials are not carried: they stay in .secrets.env or the "
+            "environment, which is where they belong."
+        )
 
 
 @app.command()

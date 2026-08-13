@@ -121,6 +121,11 @@ processes, and the half that fails is the one deciding whether two extracts of a
 may run at once. Job history is not carried across by `migrate-store`; it describes runs of
 a process that has already stopped.
 
+Declared sources move with it. A source holds the *name* of the environment variable its
+URL is read from, never the URL, so the table is exactly as safe to read as the file it
+replaces. Credentials are not carried by `migrate-store` at all: they stay in
+`.secrets.env` or the environment, which is where they belong.
+
 **Files**, when it is not. Inspectable and dependency-free, which is why it is still the
 default, but it rewrites a whole file per edit and its lock is an advisory `flock` that
 only holds within one machine. The layout below is private to that adapter — no caller

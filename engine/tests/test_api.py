@@ -21,7 +21,7 @@ from atlas.manifest import InvalidWorkspace
 from atlas.questions import QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
-from atlas.sources import Source, SourceRegistry
+from atlas.sources import Source, get_source_repository
 
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="executed: SELECT 1", result="pass")
 GUESS = Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from column name")
@@ -61,7 +61,7 @@ def client() -> TestClient:
 
 
 def register_source(url_env: str = "ELARA_DATABASE_URL") -> None:
-    SourceRegistry(sources=[Source(id="elara", adapter="postgresql", url_env=url_env)]).write()
+    get_source_repository().add(Source(id="elara", adapter="postgresql", url_env=url_env))
 
 
 def seed(name: str = "demo") -> Catalog:

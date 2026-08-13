@@ -72,6 +72,11 @@ install with its record in PostgreSQL and its jobs in a local file half-works th
 there are two engine processes, and the half that fails decides whether two extracts of
 one workspace may run at once.
 
+Declared sources have their own port (`atlas/sources/base.py`) on the same switch. A
+source never holds a credential in any store — only the *name* of the environment variable
+its URL is read from — and there is a conformance clause asserting that, because moving
+declarations into a database must not quietly change it.
+
 Schema changes are Alembic migrations under `engine/migrations/`, never DDL in the
 adapter. `atlas migrate-store` copies workspaces from files into the database; job history
 is not carried, because it describes runs of a process that has already stopped.
