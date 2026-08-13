@@ -27,7 +27,7 @@ PG_URL = postgresql+psycopg://$(PG_USER):$(PG_PASSWORD)@localhost:$(PG_PORT)/$(P
 .PHONY: help install dev \
         engine-dev engine-test engine-test-postgres engine-lint engine-shell \
         console-dev console-build console-typecheck \
-        types check image image-run clean
+        types migrate check image image-run clean
 
 help:  ## Show available targets
 	@grep -E '^[a-z-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -85,6 +85,16 @@ engine-test-postgres: ## Run the SQL tests against a throwaway PostgreSQL
 	@until docker exec $(PG_CONTAINER) pg_isready -U $(PG_USER) >/dev/null 2>&1; do sleep 1; done
 	-cd engine && ATLAS_TEST_DATABASE_URL=$(PG_URL) uv run pytest -q -m postgres
 	@docker rm -f $(PG_CONTAINER) >/dev/null 2>&1 || true
+
+# --- Atlas's own store -----------------------------------------------------
+
+migrate:  ## Apply Atlas's schema migrations (needs ATLAS_DATABASE_URL)
+	@grep -q '^ATLAS_DATABASE_URL=' $(ENGINE_ENV) 2>/dev/null || [ -n "$$ATLAS_DATABASE_URL" ] || { \
+	  echo "ATLAS_DATABASE_URL is not set. Atlas defaults to the file-backed"; \
+	  echo "store, which has no schema — there is nothing to migrate."; \
+	  exit 1; \
+	}
+	cd engine && uv run alembic upgrade head
 
 engine-lint:  ## Lint the engine (B008 is the idiomatic Typer/FastAPI default-arg pattern)
 	cd engine && uvx ruff check src tests --ignore B008

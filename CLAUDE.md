@@ -55,11 +55,19 @@ production cost testing.
 
 ## Current persistence
 
-Workspace state sits behind the `MetadataRepository` port (`atlas/metadata/base.py`).
-`YamlMetadataRepository` is the only implementation today, writing YAML under
-`ATLAS_OUTPUT_DIR`; `atlas/metadata/registry.py` is the single place that names it. The
-intended product store is Atlas-owned PostgreSQL behind the same port, after which YAML
-becomes export/archive only.
+Workspace state sits behind the `MetadataRepository` port (`atlas/metadata/base.py`), with
+two implementations: `YamlMetadataRepository` writes files under `ATLAS_OUTPUT_DIR`, and
+`PostgresMetadataRepository` writes Atlas-owned PostgreSQL. `ATLAS_DATABASE_URL` chooses,
+and `atlas/metadata/registry.py` is the only place either is named.
+
+The database store is the one to prefer: `transaction` there is a real transaction, and
+claims are rows, so a review writes one row instead of rewriting the workspace. The file
+store cannot roll back and serializes writers with an advisory `flock` that only works on
+one host. Both are held to `tests/test_metadata_conformance.py`, which runs one set of
+expectations against each — add a clause there before adding a third store.
+
+Schema changes are Alembic migrations under `engine/migrations/`, never DDL in the
+adapter. `atlas migrate-store` copies workspaces from files into the database.
 
 Policy about a workspace lives in `atlas/catalog.py`, not in the store: what may be
 published, what a re-analysed table replaces, what a regeneration may discard. Nothing

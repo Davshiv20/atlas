@@ -46,6 +46,16 @@ class Settings(BaseSettings):
     atlas_max_rows: int = Field(default=50, ge=1, le=1000)
     atlas_statement_timeout_ms: int = Field(default=15_000, ge=100, le=600_000)
 
+    # --- Atlas's own record -------------------------------------------------
+    # Where the semantic record lives. Unset means the file-backed store under
+    # `atlas_output_dir`; set means Atlas-owned PostgreSQL, which is the store
+    # that can offer real transactions and hold more than one reviewer.
+    #
+    # Deliberately not defaulted to a database. An install that has been
+    # writing files does not silently start reading an empty schema instead —
+    # moving is `atlas migrate-store`, and it is a decision someone makes.
+    atlas_database_url: str | None = None
+
     # --- output ------------------------------------------------------------
     atlas_output_dir: Path = Path("out")
 

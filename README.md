@@ -98,9 +98,26 @@ container is replaced.
 
 ## Current persistence
 
-Workspace state is reached through the `MetadataRepository` port. The only implementation
-today is file-backed under `ATLAS_OUTPUT_DIR`, and the layout below is private to it — no
-caller outside `atlas/metadata/` names a path:
+Workspace state is reached through the `MetadataRepository` port, which has two
+implementations. `ATLAS_DATABASE_URL` chooses between them.
+
+**Atlas-owned PostgreSQL**, when the URL is set. Snapshots are stored as documents because
+nothing edits one; claims, questions, and evidence are rows, because people edit those one
+at a time. A review writes one row, so two reviewers settling different claims both keep
+their verdict — and a composite operation that fails rolls back whole.
+
+```bash
+make migrate                        # apply the schema
+cd engine && uv run atlas migrate-store   # copy existing workspaces across
+```
+
+Setting the URL changes where Atlas looks, not where the data is. Without the copy the
+engine comes up on an empty schema and every workspace reads as absent.
+
+**Files**, when it is not. Inspectable and dependency-free, which is why it is still the
+default, but it rewrites a whole file per edit and its lock is an advisory `flock` that
+only holds within one machine. The layout below is private to that adapter — no caller
+outside `atlas/metadata/` names a path:
 
 ```text
 <workspace>/workspace.yaml                 # immutable source + active generation

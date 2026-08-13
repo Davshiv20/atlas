@@ -60,5 +60,6 @@ line-length = 100
 
 [dependency-groups]
 dev = [
+    "alembic>=1.19.0",
     "pytest>=9.1.1",
 ]

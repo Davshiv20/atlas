@@ -195,6 +195,92 @@ def workspaces() -> None:
 
 
 @app.command()
+def migrate_store(
+    dry_run: bool = typer.Option(False, help="Report what would move, write nothing"),
+) -> None:
+    """Copy every workspace from the file store into the database one.
+
+    Setting `ATLAS_DATABASE_URL` changes where Atlas looks, not where the data
+    is. Without this the engine comes up pointed at an empty schema and every
+    workspace reads as absent — which is indistinguishable from deleted, and
+    the reviewer whose work it was cannot tell the difference either.
+
+    A copy, not a move. The files are left exactly as they are, so pointing the
+    variable back is how you undo this. Run `alembic upgrade head` first.
+    """
+    from atlas.metadata.postgres_store import PostgresMetadataRepository
+    from atlas.metadata.yaml_store import YamlMetadataRepository
+    from atlas.settings import get_settings
+
+    url = get_settings().atlas_database_url
+    if url is None:
+        raise typer.BadParameter(
+            "ATLAS_DATABASE_URL is not set, so there is no database to migrate into"
+        )
+
+    files = YamlMetadataRepository()
+    database = PostgresMetadataRepository(url)
+    names = files.list_workspaces()
+    if not names:
+        typer.echo("no workspaces in the file store")
+        return
+
+    for name in names:
+        if not files.exists(name):
+            # Pre-manifest data. It has to be adopted before it can be copied,
+            # and adoption needs a declared source — which is a decision, not
+            # something to guess partway through a migration.
+            typer.echo(f"{name}\tSKIPPED\tnot registered; run `atlas workspaces` first")
+            continue
+        if database.exists(name):
+            typer.echo(f"{name}\tSKIPPED\talready in the database")
+            continue
+
+        manifest = files.read_manifest(name)
+        facts = files.read_facts(name)
+        questions = files.read_questions(name)
+        evidence = files.read_evidence(name)
+        summary = (
+            f"generation {manifest.snapshot_generation}, {len(facts.facts)} claims, "
+            f"{len(questions.questions)} questions, {len(evidence.records)} evidence"
+        )
+        if dry_run:
+            typer.echo(f"{name}\tWOULD COPY\t{summary}")
+            continue
+
+        # One transaction per workspace: a workspace arrives whole or not at
+        # all, and a failure halfway leaves nothing half-copied to reconcile.
+        with database.transaction(name):
+            if files.has_snapshot(name):
+                # Registered one generation short and then published, so the
+                # snapshot lands under the number the manifest already claims.
+                # Copying it in at generation 1 and then setting the pointer to
+                # 5 would leave the workspace looking for a generation that was
+                # never written, and its claims filed under one with no
+                # snapshot to read them against.
+                database.create(
+                    name,
+                    manifest.model_copy(
+                        update={"snapshot_generation": manifest.snapshot_generation - 1}
+                    ),
+                )
+                database.publish_snapshot(name, files.read_snapshot(name))
+            else:
+                database.create(name, manifest)
+            if facts.facts:
+                database.upsert_facts(name, facts.facts)
+            if questions.questions:
+                database.upsert_questions(name, questions.questions)
+            database.append_evidence(name, evidence)
+        typer.echo(f"{name}\tCOPIED\t{summary}")
+
+    if dry_run:
+        typer.echo("\nnothing was written; rerun without --dry-run")
+    else:
+        typer.echo("\nfiles left in place; unset ATLAS_DATABASE_URL to go back to them")
+
+
+@app.command()
 def preflight() -> None:
     """Check the configured model exists on OpenRouter and answers a tool call."""
     from atlas.llm import Tool, build_client, effort, model_id, run_tool_loop
