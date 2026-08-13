@@ -36,7 +36,7 @@ from atlas.catalog import (
 # is the name that belongs to the URL.
 from atlas.catalog import list_workspaces as all_workspace_names
 from atlas.decisions import record_decision
-from atlas.facts import Consequence, Fact, FactStatus, FactStore
+from atlas.facts import Consequence, Fact, FactStatus
 from atlas.jobs import ActiveWorkspaceJob, Job, JobProgress, ProgressReporter, get_registry
 from atlas.manifest import InvalidWorkspace, WorkspaceManifest
 from atlas.metadata import WorkspaceBusy
@@ -1033,9 +1033,7 @@ def answer_question(
 
     settled = question.answered(request.answer, request.reviewer)
     facts, evidence, claim = record_answer(settled, workspace.facts(), workspace.evidence())
-    workspace.write_facts(facts)
-    workspace.write_evidence(evidence)
-    workspace.write_questions(log.replace(settled))
+    workspace.record_answered_question(settled, facts, evidence)
     return {"question": settled.model_dump(mode="json"), "claim": claim.model_dump(mode="json")}
 
 
@@ -1059,7 +1057,7 @@ def dismiss_question(
         raise HTTPException(status_code=404, detail=f"no question {question_id!r}")
 
     settled = question.dismissed(request.answer, request.reviewer)
-    workspace.write_questions(log.replace(settled))
+    workspace.settle_question(settled)
     return {"question": settled.model_dump(mode="json")}
 
 
@@ -1119,10 +1117,10 @@ def review_claim(
         text=request.claim,
     )
 
-    workspace.write_evidence(evidence)
-    workspace.write_facts(
-        FactStore(facts=[f for f in store.facts if f.id != claim_id] + [updated])
-    )
+    # One claim and its decision, not the whole store rewritten around them.
+    # Two reviewers settling different claims a second apart both keep their
+    # verdict; the wholesale write kept only whichever landed second.
+    workspace.record_review(updated, evidence)
     return updated
 
 

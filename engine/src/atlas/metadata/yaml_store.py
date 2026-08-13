@@ -8,10 +8,15 @@ changing shape, which is why it is still the default.
 Its limits are the reason the port above it exists:
 
 - `transaction` is an advisory `flock`, not a transaction. It serializes
-  writers, so two processes cannot interleave; it cannot roll back. A composite
+  writers, so two of them cannot interleave; it cannot roll back. A composite
   operation that raises halfway leaves the earlier writes in place.
-- Every write rewrites a whole file. Two reviewers approving different claims
-  is a last-write-wins race that no lock granularity here can fix.
+- Every write rewrites a whole file. The scoped writes are honest about which
+  records they change — a review touches one claim, not the store around it —
+  but they get there by reading the file and writing it back under the lock,
+  so the cost is the size of the workspace on every edit.
+- `flock` is advisory and local. Two Atlas processes on one machine are
+  serialized; two machines sharing a network directory are not, and this store
+  has no way to notice.
 
 Everything about the layout — directory names, file names, the YAML itself,
 and the migrations that keep older files loadable — is private to this module.
@@ -25,15 +30,16 @@ import hashlib
 import logging
 import os
 import shutil
-from collections.abc import Iterator
+import threading
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from atlas.evidence import EvidenceStore
-from atlas.facts import PLURAL_ASPECTS, FactStore
+from atlas.evidence import ClaimEvidence, EvidenceStore
+from atlas.facts import PLURAL_ASPECTS, Fact, FactStore
 from atlas.manifest import WorkspaceManifest, require_valid_name
 from atlas.metadata.base import (
     MetadataRepository,
@@ -42,7 +48,7 @@ from atlas.metadata.base import (
     WorkspaceBusy,
     WorkspaceExists,
 )
-from atlas.questions import QuestionLog
+from atlas.questions import Question, QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Snapshot
 
@@ -249,17 +255,84 @@ class YamlMetadataRepository(MetadataRepository):
     def read_facts(self, workspace: str) -> FactStore:
         return _read_facts(self._active(workspace, FACTS))
 
-    def write_facts(self, workspace: str, facts: FactStore) -> None:
-        _write_facts(self._active(workspace, FACTS), facts)
-
     def read_questions(self, workspace: str) -> QuestionLog:
         return _read_questions(self._active(workspace, QUESTIONS))
 
-    def write_questions(self, workspace: str, questions: QuestionLog) -> None:
-        _write_questions(self._active(workspace, QUESTIONS), questions)
-
     def read_evidence(self, workspace: str) -> EvidenceStore:
         return _read_evidence(self._active(workspace, EVIDENCE))
+
+    # ---- scoped writes ---------------------------------------------------
+    #
+    # Honest about what this store can and cannot do. Each of these addresses
+    # one record, but the file underneath is rewritten whole, so the isolation
+    # the port describes comes only from `transaction` serializing writers
+    # within one machine. Two Atlas processes on two hosts sharing a directory
+    # would still interleave. That is the limit of a filesystem, and it is the
+    # reason the Postgres store exists.
+
+    def upsert_facts(self, workspace: str, facts: list[Fact]) -> None:
+        if not facts:
+            return
+        with self.transaction(workspace):
+            incoming = {fact.id: fact for fact in facts}
+            kept = [f for f in self.read_facts(workspace).facts if f.id not in incoming]
+            self.write_facts(
+                workspace,
+                FactStore(facts=sorted([*kept, *incoming.values()], key=lambda f: f.id)),
+            )
+
+    def remove_facts(self, workspace: str, ids: Collection[str]) -> int:
+        if not ids:
+            return 0
+        with self.transaction(workspace):
+            stored = self.read_facts(workspace).facts
+            kept = [f for f in stored if f.id not in ids]
+            if len(kept) != len(stored):
+                self.write_facts(workspace, FactStore(facts=kept))
+            return len(stored) - len(kept)
+
+    def upsert_questions(self, workspace: str, questions: list[Question]) -> None:
+        if not questions:
+            return
+        with self.transaction(workspace):
+            incoming = {question.id: question for question in questions}
+            kept = [
+                q for q in self.read_questions(workspace).questions if q.id not in incoming
+            ]
+            self.write_questions(
+                workspace, QuestionLog(questions=[*kept, *incoming.values()])
+            )
+
+    def remove_questions(self, workspace: str, ids: Collection[str]) -> int:
+        if not ids:
+            return 0
+        with self.transaction(workspace):
+            stored = self.read_questions(workspace).questions
+            kept = [q for q in stored if q.id not in ids]
+            if len(kept) != len(stored):
+                self.write_questions(workspace, QuestionLog(questions=kept))
+            return len(stored) - len(kept)
+
+    def append_evidence(self, workspace: str, evidence: EvidenceStore) -> None:
+        if not evidence.records and not evidence.links:
+            return
+        with self.transaction(workspace):
+            kept = self.read_evidence(workspace)
+            for record in evidence.records:
+                kept.add(record)
+            known = {_link_identity(link) for link in kept.links}
+            kept.links.extend(
+                link for link in evidence.links if _link_identity(link) not in known
+            )
+            self.write_evidence(workspace, kept)
+
+    # ---- wholesale writes ------------------------------------------------
+
+    def write_facts(self, workspace: str, facts: FactStore) -> None:
+        _write_facts(self._active(workspace, FACTS), facts)
+
+    def write_questions(self, workspace: str, questions: QuestionLog) -> None:
+        _write_questions(self._active(workspace, QUESTIONS), questions)
 
     def write_evidence(self, workspace: str, evidence: EvidenceStore) -> None:
         _write_evidence(self._active(workspace, EVIDENCE), evidence)
@@ -292,9 +365,27 @@ class YamlMetadataRepository(MetadataRepository):
         that raises partway leaves the writes it already made. Fixing that is a
         reason to implement this port against a database, not a reason to
         pretend here.
+
+        Re-entrant within a thread, and it has to be. `flock` is held per open
+        file description, so a thread that already holds the lock and opens the
+        file again waits for itself — and the request path does exactly that:
+        the write guard takes the lock as a dependency, then the endpoint body
+        calls a scoped write that wants it too. Nested entry is a no-op; the
+        outermost `with` still owns the release.
         """
         root = self._workspace_root(workspace)
+        held = _held_locks()
+        key = str(root.resolve() if root.exists() else root)
+        if held.get(key):
+            held[key] += 1
+            try:
+                yield
+            finally:
+                held[key] -= 1
+            return
+
         root.mkdir(parents=True, exist_ok=True)
+        key = str(root.resolve())
         with (root / LOCK).open("a+") as handle:
             operation = fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB)
             try:
@@ -303,10 +394,41 @@ class YamlMetadataRepository(MetadataRepository):
                 raise WorkspaceBusy(
                     f"workspace {workspace!r} already has an active mutation"
                 ) from exc
+            held[key] = 1
             try:
                 yield
             finally:
+                held.pop(key, None)
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _link_identity(link: ClaimEvidence) -> tuple[str, str, str]:
+    """What makes two links the same link.
+
+    Not the rationale: that is prose the writer chose, and two callers wording
+    it differently are still saying that this record bears on this claim in
+    this way. Keying on it would let the same statement accumulate a copy per
+    append.
+    """
+    return (link.claim_id, link.evidence_id, link.relationship.value)
+
+
+# --- lock ownership --------------------------------------------------------
+
+#: Which workspace directories this thread already holds the lock on, and how
+#: deep. Deliberately module-level rather than per-repository: `flock` is owned
+#: by the process, so two `YamlMetadataRepository` objects pointing at the same
+#: directory are one lock holder, and the request path builds exactly that —
+#: one repository for the write guard, another for the endpoint body.
+_LOCKS = threading.local()
+
+
+def _held_locks() -> dict[str, int]:
+    depths = getattr(_LOCKS, "depths", None)
+    if depths is None:
+        depths = {}
+        _LOCKS.depths = depths
+    return depths
 
 
 # --- serialization ---------------------------------------------------------

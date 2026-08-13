@@ -325,6 +325,64 @@ def seed_wide(name: str = "wide") -> Catalog:
 
 
 
+def test_recording_a_review_writes_that_claim_and_no_other() -> None:
+    """Both reviewers opened the queue before either decided, so each holds the
+    store as it was. A write that carried a whole store would take the second
+    reviewer's stale copy of the first one's claim back to unverified — and say
+    nothing about it: the request succeeds, the response shows their own claim
+    approved, and the other decision is simply gone at the next read.
+    """
+    from atlas.decisions import record_decision
+
+    workspace = seed()
+    first_view = workspace.facts()
+    second_view = workspace.facts()
+
+    grain, evidence = record_decision(
+        first_view.by_id("orders#grain"),
+        workspace.evidence(),
+        reviewer="first",
+        decision=FactStatus.VERIFIED,
+    )
+    workspace.record_review(grain, evidence)
+
+    # Decided from a view taken before the verdict above landed.
+    semantics, evidence = record_decision(
+        second_view.by_id("orders.status#semantics"),
+        workspace.evidence(),
+        reviewer="second",
+        decision=FactStatus.VERIFIED,
+    )
+    workspace.record_review(semantics, evidence)
+
+    stored = workspace.facts()
+    assert stored.by_id("orders#grain").verified_by == "first"
+    assert stored.by_id("orders.status#semantics").verified_by == "second"
+
+
+def test_appending_evidence_a_caller_already_holds_adds_nothing_twice() -> None:
+    """A scoped write takes the store the caller was working from rather than
+    a delta it had to compute, so appending has to be idempotent — in the
+    records, which are content-addressed, and in the links, which are not."""
+    from atlas.decisions import record_decision
+
+    workspace = seed()
+    updated, evidence = record_decision(
+        workspace.facts().by_id("orders#grain"),
+        workspace.evidence(),
+        reviewer="shivam",
+        decision=FactStatus.VERIFIED,
+    )
+    workspace.record_review(updated, evidence)
+    once = workspace.evidence()
+    assert (len(once.records), len(once.links)) == (1, 1)
+
+    workspace.record_review(updated, once)
+
+    twice = workspace.evidence()
+    assert (len(twice.records), len(twice.links)) == (1, 1)
+
+
 def test_class_review_never_overwrites_a_deliberate_decision(client) -> None:
     workspace = seed_wide()
     client.post(

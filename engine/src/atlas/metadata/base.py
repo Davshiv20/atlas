@@ -39,13 +39,13 @@ speaks them has already chosen that implementation.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 
 from atlas.evidence import EvidenceStore
-from atlas.facts import FactStore
+from atlas.facts import Fact, FactStore
 from atlas.manifest import WorkspaceManifest
-from atlas.questions import QuestionLog
+from atlas.questions import Question, QuestionLog
 from atlas.snapshot import Snapshot
 
 
@@ -161,7 +161,7 @@ class MetadataRepository(ABC):
         what source to `adopt` it into.
         """
 
-    # ---- semantic state --------------------------------------------------
+    # ---- semantic state: reading -----------------------------------------
     #
     # Each returns an empty store rather than raising when nothing has been
     # written. A workspace that has been extracted but never analysed is an
@@ -171,24 +171,71 @@ class MetadataRepository(ABC):
     def read_facts(self, workspace: str) -> FactStore: ...
 
     @abstractmethod
-    def write_facts(self, workspace: str, facts: FactStore) -> None: ...
-
-    @abstractmethod
     def read_questions(self, workspace: str) -> QuestionLog: ...
 
     @abstractmethod
-    def write_questions(self, workspace: str, questions: QuestionLog) -> None: ...
+    def read_evidence(self, workspace: str) -> EvidenceStore: ...
+
+    # ---- semantic state: scoped writes -----------------------------------
+    #
+    # These exist because of who is writing. Review is many people working the
+    # same workspace at once through synchronous requests, and read-all /
+    # write-all loses one of two verdicts recorded a second apart — the loser
+    # having read the store before the winner wrote it. A store that can
+    # address one claim must do so, and these are how a caller says which one.
+    #
+    # None of them read the collection first, so none of them can clobber a
+    # sibling they never saw.
 
     @abstractmethod
-    def read_evidence(self, workspace: str) -> EvidenceStore: ...
+    def upsert_facts(self, workspace: str, facts: list[Fact]) -> None:
+        """Insert or replace these claims by id, leaving every other claim
+        alone."""
+
+    @abstractmethod
+    def remove_facts(self, workspace: str, ids: Collection[str]) -> int:
+        """Delete these claims by id. Returns how many existed."""
+
+    @abstractmethod
+    def upsert_questions(self, workspace: str, questions: list[Question]) -> None: ...
+
+    @abstractmethod
+    def remove_questions(self, workspace: str, ids: Collection[str]) -> int: ...
+
+    @abstractmethod
+    def append_evidence(self, workspace: str, evidence: EvidenceStore) -> None:
+        """Add these records and links to what is stored.
+
+        Idempotent in both. A record is content-addressed, so re-adding one is
+        the identical observation and a no-op; a link is identified by the
+        claim, the record, and the relationship between them, and re-adding one
+        says nothing the store does not already hold.
+
+        That is what makes it safe to hand this the whole store a caller was
+        working from, rather than a delta it had to compute — and computing
+        that delta correctly is exactly what a second writer gets wrong.
+        """
+
+    # ---- semantic state: wholesale writes --------------------------------
+    #
+    # For the operations that genuinely rebuild a collection: a regeneration
+    # deciding what survives, or the relationship map being replaced whole.
+    # Those run inside a job holding the workspace exclusively, so read-all /
+    # write-all is the correct shape there and not a race.
+
+    @abstractmethod
+    def write_facts(self, workspace: str, facts: FactStore) -> None: ...
+
+    @abstractmethod
+    def write_questions(self, workspace: str, questions: QuestionLog) -> None: ...
 
     @abstractmethod
     def write_evidence(self, workspace: str, evidence: EvidenceStore) -> None: ...
 
     @abstractmethod
     def clear_semantics(self, workspace: str) -> dict[str, int]:
-        """Discard claims, questions, evidence, and the projection. Returns
-        what was removed, per kind, so a caller can report it."""
+        """Discard claims, questions, and evidence. Returns what was removed,
+        per kind, so a caller can report it."""
 
     # There is deliberately no projection here. `SchemaOutput` is derived from
     # snapshot plus facts plus evidence and is rebuilt on every read; a stored

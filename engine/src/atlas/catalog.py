@@ -192,6 +192,45 @@ class Catalog:
     def evidence(self) -> EvidenceStore:
         return self.repository.read_evidence(self.name)
 
+    # ---- scoped writes ---------------------------------------------------
+    #
+    # What review uses. Each names the records it is changing, so two people
+    # settling different claims a second apart both keep their decision — the
+    # failure that read-all/write-all produces and never reports.
+
+    def record_review(self, fact: Fact, evidence: EvidenceStore) -> None:
+        """Persist one reviewed claim and the evidence behind the decision.
+
+        The evidence store passed may be the whole one the caller was working
+        from: appending is idempotent per record and per link, so the caller is
+        not made to compute a delta it would get wrong under concurrency.
+        """
+        self.repository.upsert_facts(self.name, [fact])
+        self.repository.append_evidence(self.name, evidence)
+
+    def record_answered_question(
+        self, question: Question, facts: FactStore, evidence: EvidenceStore
+    ) -> None:
+        """Persist a settled question, the claim it established, and its
+        evidence.
+
+        Takes the full fact store because answering re-scores one claim and the
+        caller does not know which id until the answer is folded in; only the
+        claims that actually changed are written.
+        """
+        self.repository.upsert_questions(self.name, [question])
+        self.repository.upsert_facts(self.name, _changed(self.facts(), facts))
+        self.repository.append_evidence(self.name, evidence)
+
+    def settle_question(self, question: Question) -> None:
+        """Record a question as answered or dismissed, touching nothing else."""
+        self.repository.upsert_questions(self.name, [question])
+
+    # ---- wholesale writes ------------------------------------------------
+    #
+    # For a job that holds the workspace exclusively and is rebuilding a
+    # collection rather than editing records in it.
+
     def write_facts(self, facts: FactStore) -> None:
         self.repository.write_facts(self.name, facts)
 
@@ -272,24 +311,41 @@ class Catalog:
         an engine restart discarded twenty minutes of model spend. Both were
         the same missing write.
         """
-        self.snapshot()
-        self.write_facts(self.facts().merge(facts))
+        with self.mutation():
+            self.snapshot()
+            # Merged against everything stored, so a human verdict on an
+            # unchanged claim survives, but only the claims this table produced
+            # are written back. A concurrent reviewer approving something in
+            # another table is not in this set and cannot be overwritten by it.
+            incoming = {fact.id for fact in facts}
+            merged = self.facts().merge(facts)
+            self.repository.upsert_facts(
+                self.name, [f for f in merged.facts if f.id in incoming]
+            )
+            self.repository.append_evidence(self.name, evidence)
 
-        kept = self.evidence()
-        for record in evidence.records:
-            kept.add(record)
-        kept.links.extend(evidence.links)
-        self.write_evidence(kept)
-
-        # This table's questions are replaced, not appended: re-analysing it
-        # asks its questions again, and two copies of one question is two
-        # review decisions for one uncertainty. `merge` carries any answer
-        # across, so re-running never asks a reviewer something they settled.
-        stored = self.questions()
-        others = [q for q in stored.questions if q.table != table]
-        self.write_questions(
-            QuestionLog(questions=others + stored.merge(list(questions)).questions)
-        )
+            # This table's questions are replaced, not appended: re-analysing
+            # it asks its questions again, and two copies of one question is
+            # two review decisions for one uncertainty.
+            #
+            # An answered question is kept whether or not this run asked it
+            # again. The id hashes the question text, so re-analysis rarely
+            # reproduces one byte for byte, and keying only off the fresh batch
+            # dropped every answer for the table on each re-run.
+            #
+            # Scoped to this table. The wholesale version merged across the
+            # whole log and wrote the result back beside the untouched
+            # remainder, which left every *other* table's answered questions
+            # stored twice.
+            mine = [q for q in self.questions().questions if q.table == table]
+            answered = {q.id for q in mine if q.settled}
+            fresh = [q for q in questions if q.id not in answered]
+            self.repository.remove_questions(
+                self.name,
+                {q.id for q in mine if q.id not in answered}
+                - {q.id for q in fresh},
+            )
+            self.repository.upsert_questions(self.name, fresh)
 
     def absorb_relationships(
         self,
@@ -310,19 +366,27 @@ class Catalog:
         trade: the replacement is enforced or verified, and carries more
         authority than the review it discards.
         """
-        self.snapshot()
-        stored = self.facts()
-        kept_facts = [f for f in stored.facts if f.aspect != "join"]
-        self.write_facts(FactStore(facts=kept_facts).merge(facts))
+        with self.mutation():
+            self.snapshot()
+            stored = self.facts()
+            replacement = {fact.id for fact in facts}
+            self.repository.remove_facts(
+                self.name,
+                {f.id for f in stored.facts if f.aspect == "join" and f.id not in replacement},
+            )
+            self.repository.upsert_facts(self.name, facts)
 
-        kept = self.evidence()
-        for record in evidence.records:
-            kept.add(record)
-        known = {link.claim_id for link in links}
-        kept.links = [
-            link for link in kept.links if link.claim_id not in known
-        ] + list(links)
-        self.write_evidence(kept)
+            # Links for a re-derived join are replaced rather than added to:
+            # the previous run's rationale describes a map that no longer
+            # exists. Everything else keeps its evidence untouched.
+            kept = self.evidence()
+            for record in evidence.records:
+                kept.add(record)
+            superseded = {link.claim_id for link in links}
+            kept.links = [
+                link for link in kept.links if link.claim_id not in superseded
+            ] + list(links)
+            self.write_evidence(kept)
 
     def drop(self, tables: set[str]) -> dict[str, int]:
         """Remove claims, questions, and evidence for these tables only.
@@ -337,32 +401,36 @@ class Catalog:
         that content-addressed history is lost for these tables — acceptable
         while regeneration is a testing affordance, not a production path.
         """
-        self.snapshot()
-        facts = self.facts()
-        kept_facts = [f for f in facts.facts if f.subject.split(".")[0] not in tables]
+        with self.mutation():
+            self.snapshot()
+            doomed_facts = {
+                f.id for f in self.facts().facts if f.subject.split(".")[0] in tables
+            }
+            doomed_questions = {
+                q.id for q in self.questions().questions if q.table in tables
+            }
 
-        evidence = self.evidence()
-        kept_records = [r for r in evidence.records if not _touches(r.subjects, tables)]
-        kept_ids = {r.id for r in kept_records}
-        kept_links = [
-            link
-            for link in evidence.links
-            if link.evidence_id in kept_ids
-            and link.claim_id.split("#")[0].split(".")[0] not in tables
-        ]
+            evidence = self.evidence()
+            kept_records = [r for r in evidence.records if not _touches(r.subjects, tables)]
+            kept_ids = {r.id for r in kept_records}
+            kept_links = [
+                link
+                for link in evidence.links
+                if link.evidence_id in kept_ids
+                and link.claim_id.split("#")[0].split(".")[0] not in tables
+            ]
 
-        questions = self.questions()
-        kept_questions = [q for q in questions.questions if q.table not in tables]
-
-        removed = {
-            "claims": len(facts.facts) - len(kept_facts),
-            "evidence": len(evidence.records) - len(kept_records),
-            "questions": len(questions.questions) - len(kept_questions),
-        }
-        self.write_facts(FactStore(facts=kept_facts))
-        self.write_evidence(EvidenceStore(records=kept_records, links=kept_links))
-        self.write_questions(QuestionLog(questions=kept_questions))
-        return removed
+            removed = {
+                "claims": self.repository.remove_facts(self.name, doomed_facts),
+                "evidence": len(evidence.records) - len(kept_records),
+                "questions": self.repository.remove_questions(self.name, doomed_questions),
+            }
+            # Evidence is rebuilt whole rather than deleted by id: a record is
+            # dropped for touching one of these tables, and a link is dropped
+            # for pointing at a record that went with it, so the surviving set
+            # is what the filter produced rather than a list of ids.
+            self.write_evidence(EvidenceStore(records=kept_records, links=kept_links))
+            return removed
 
 
 def list_workspaces(repository: MetadataRepository | None = None) -> list[str]:
@@ -390,6 +458,18 @@ def referencing_source(
         if referenced == source_id:
             found.append(name)
     return sorted(found)
+
+
+def _changed(before: FactStore, after: FactStore) -> list[Fact]:
+    """Which claims `after` states differently from `before`.
+
+    Answering a question re-scores one claim, or writes a new one, out of a
+    store that may hold thousands. Writing back only what moved is what keeps
+    an unrelated claim someone approved a moment ago from being reverted to the
+    copy this request happened to read.
+    """
+    stored = {fact.id: fact for fact in before.facts}
+    return [fact for fact in after.facts if stored.get(fact.id) != fact]
 
 
 def _touches(subjects: list[str], tables: set[str]) -> bool:
