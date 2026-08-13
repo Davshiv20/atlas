@@ -98,7 +98,9 @@ container is replaced.
 
 ## Current persistence
 
-Workspace state is currently file-backed under `ATLAS_OUTPUT_DIR`:
+Workspace state is reached through the `MetadataRepository` port. The only implementation
+today is file-backed under `ATLAS_OUTPUT_DIR`, and the layout below is private to it — no
+caller outside `atlas/metadata/` names a path:
 
 ```text
 <workspace>/workspace.yaml                 # immutable source + active generation

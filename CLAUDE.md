@@ -55,9 +55,16 @@ production cost testing.
 
 ## Current persistence
 
-Workspace state is currently stored as YAML under `ATLAS_OUTPUT_DIR`. This is a temporary,
-inspectable development repository. The intended product store is Atlas-owned PostgreSQL
-behind a `MetadataRepository` port; YAML then becomes export/archive only.
+Workspace state sits behind the `MetadataRepository` port (`atlas/metadata/base.py`).
+`YamlMetadataRepository` is the only implementation today, writing YAML under
+`ATLAS_OUTPUT_DIR`; `atlas/metadata/registry.py` is the single place that names it. The
+intended product store is Atlas-owned PostgreSQL behind the same port, after which YAML
+becomes export/archive only.
+
+Policy about a workspace lives in `atlas/catalog.py`, not in the store: what may be
+published, what a re-analysed table replaces, what a regeneration may discard. Nothing
+outside `atlas/metadata/` may name a path, and the domain models do not serialize
+themselves — a model that knows how to write itself to disk has already picked a store.
 
 Never commit `.env`, `.secrets.env`, workspace snapshots, evidence, profiles, or customer
 sample data.

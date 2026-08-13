@@ -22,6 +22,7 @@ from atlas.evidence import (
     Verdict,
 )
 from atlas.facts import Fact, FactStatus, Provenance, ProvenanceKind
+from atlas.metadata.yaml_store import YamlMetadataRepository
 
 GUESS = [Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from column name")]
 
@@ -288,9 +289,9 @@ def test_endorsement_is_never_written_to_disk(tmp_path) -> None:
     )
     assert fact.endorsement is not None, "still derived in memory"
 
-    path = tmp_path / "facts.yaml"
-    FactStore(facts=[fact]).write(path)
+    store = YamlMetadataRepository(tmp_path)
+    store.write_facts("demo", FactStore(facts=[fact]))
 
-    assert "endorsement" not in path.read_text()
+    assert "endorsement" not in (tmp_path / "demo" / "facts.yaml").read_text()
     # And it survives the round trip, because nothing depends on the stored copy.
-    assert FactStore.read(path).facts[0].claim == fact.claim
+    assert store.read_facts("demo").facts[0].claim == fact.claim

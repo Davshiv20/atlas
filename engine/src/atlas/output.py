@@ -10,10 +10,8 @@ consulting anything else.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import BaseModel, Field
 
 from atlas.classify import Consequence, classify_column, consequence
@@ -265,14 +263,6 @@ class SchemaOutput(BaseModel):
     question_count: int
     tables: list[TableOutput] = Field(default_factory=list)
 
-    def write(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(mode="json", exclude_none=True)
-        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))
-
-    @classmethod
-    def read(cls, path: Path) -> SchemaOutput:
-        return cls.model_validate(yaml.safe_load(path.read_text()))
 
 
 def _all(

@@ -18,20 +18,15 @@ each is the kind of rule that quietly erodes once a deadline appears:
 from __future__ import annotations
 
 import hashlib
-import logging
 import re
 from enum import StrEnum
-from pathlib import Path
 from typing import Literal, Self
 
-import yaml
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 from atlas.classify import Consequence
 from atlas.endorsement import EndorsementAssessment
 from atlas.policy import TrustAssessment
-
-logger = logging.getLogger(__name__)
 
 UNGROUNDED_CONFIDENCE_CEILING = 0.7
 
@@ -213,48 +208,6 @@ class FactStore(BaseModel):
 
     def needing_review(self) -> list[Fact]:
         return [f for f in self.facts if f.status is FactStatus.UNVERIFIED]
-
-    def write(self, path: Path) -> None:
-        """Persist the review history — and only that.
-
-        `endorsement` is derived on every read and is deliberately not written.
-        Storing it was the mistake this model exists to remove: a value on disk
-        outlives the code that produced it, so renaming one of its states left
-        every stored workspace unreadable. Derived state has no business in a
-        file that is meant to be the durable record.
-        """
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(
-            mode="json", exclude_none=True, exclude={"facts": {"__all__": {"endorsement"}}}
-        )
-        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
-
-    @classmethod
-    def read(cls, path: Path) -> FactStore:
-        if not path.exists():
-            return cls()
-        raw = yaml.safe_load(path.read_text()) or {}
-        return cls.model_validate({**raw, "facts": [_migrate(f) for f in raw.get("facts", [])]})
-
-
-def _migrate(raw: dict) -> dict:
-    """Give a pre-discriminator claim one, so old catalogues still load.
-
-    Derived from the claim text, which makes it stable across reads — the same
-    file parses to the same ids every time. It is deliberately ugly: a
-    `legacy-` prefix in an id is a visible marker that this claim predates the
-    plural-aspect rule and may be several findings concatenated into one.
-    """
-    if raw.get("aspect") not in PLURAL_ASPECTS or raw.get("discriminator") is not None:
-        return raw
-    digest = hashlib.sha256(str(raw.get("claim", "")).encode()).hexdigest()[:8]
-    logger.info(
-        "migrating %s#%s: assigning discriminator legacy-%s",
-        raw.get("subject"),
-        raw.get("aspect"),
-        digest,
-    )
-    return {**raw, "discriminator": f"legacy-{digest}"}
 
 
 def _carry_verdict(existing: Fact, incoming: Fact) -> Fact:

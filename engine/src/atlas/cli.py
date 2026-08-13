@@ -8,33 +8,29 @@ from pathlib import Path
 import typer
 
 from atlas.adapters.registry import create_adapter
+from atlas.catalog import Catalog, WorkspaceConflict, list_workspaces, referencing_source
 from atlas.jobs import get_registry
+from atlas.manifest import InvalidWorkspace, WorkspaceManifest
+from atlas.metadata import WorkspaceBusy
 from atlas.sources import Source, SourceNotFound, SourceRegistry, source_registry_lock
-from atlas.workspace import (
-    InvalidWorkspace,
-    Workspace,
-    WorkspaceBusy,
-    WorkspaceConflict,
-    WorkspaceManifest,
-)
 
 app = typer.Typer(help="Grounded schema catalogue generator", no_args_is_help=True)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
-def _workspace(name: str) -> Workspace:
-    """The CLI and the API address the same layout, so a workspace written by
-    one is readable by the other."""
+def _workspace(name: str) -> Catalog:
+    """The CLI and the API go through the same metadata store, so a workspace
+    written by one is readable by the other."""
     try:
-        return Workspace(name)
+        return Catalog(name)
     except InvalidWorkspace as exc:
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _existing(name: str) -> Workspace:
+def _existing(name: str) -> Catalog:
     workspace = _workspace(name)
     manifest = _ensure_manifest(workspace)
-    if not workspace.exists():
+    if not workspace.has_snapshot():
         raise typer.BadParameter(f"workspace {name!r} has no snapshot; run extract first")
     try:
         workspace.validate_snapshot(manifest)
@@ -43,12 +39,12 @@ def _existing(name: str) -> Workspace:
     return workspace
 
 
-def _ensure_manifest(workspace: Workspace) -> WorkspaceManifest:
-    if workspace.has_manifest():
-        return workspace.read_manifest()
-    if not workspace.snapshot_path.exists():
+def _ensure_manifest(workspace: Catalog) -> WorkspaceManifest:
+    if workspace.is_registered():
+        return workspace.manifest()
+    if not workspace.has_snapshot():
         raise typer.BadParameter(f"workspace {workspace.name!r} is not bound to a source")
-    snapshot = workspace.read_snapshot()
+    snapshot = workspace.unchecked_snapshot()
     if not snapshot.source_id:
         raise typer.BadParameter(
             f"workspace {workspace.name!r} has no manifest and no snapshot.source_id; refusing migration"
@@ -61,7 +57,7 @@ def _ensure_manifest(workspace: Workspace) -> WorkspaceManifest:
                 f"workspace {workspace.name!r} references missing source {snapshot.source_id!r}"
             ) from exc
         try:
-            return workspace.migrate_legacy(snapshot.source_id)
+            return workspace.adopt(snapshot.source_id)
         except WorkspaceConflict as exc:
             raise typer.BadParameter(str(exc)) from exc
 
@@ -81,14 +77,14 @@ def _source_url(source: Source) -> str:
 
 
 @contextmanager
-def _mutation(workspace: Workspace) -> Iterator[None]:
-    """Share the API's SQLite reservation and interprocess workspace lock."""
+def _mutation(workspace: Catalog) -> Iterator[None]:
+    """Share the API's SQLite reservation and the store's workspace lock."""
     registry = get_registry()
     active = registry.active_workspace_job(workspace.name)
     if active:
         raise typer.BadParameter(f"workspace has active job {active.id}")
     try:
-        with workspace.mutation_lock(blocking=False):
+        with workspace.mutation(blocking=False):
             active = registry.active_workspace_job(workspace.name)
             if active:
                 raise typer.BadParameter(f"workspace has active job {active.id}")
@@ -105,12 +101,12 @@ def create_workspace(
     """Create a workspace manifest bound to one source."""
     with source_registry_lock():
         _source(source_id)
-        referenced = Workspace.referencing_source(source_id)
+        referenced = referencing_source(source_id)
         if referenced and workspace_name not in referenced:
             raise typer.BadParameter(f"source already has workspace(s): {', '.join(referenced)}")
         workspace = _workspace(workspace_name)
         try:
-            workspace.create_manifest(source_id)
+            workspace.register(source_id)
         except WorkspaceConflict as exc:
             raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"{workspace.name} -> source {source_id}")
@@ -132,12 +128,12 @@ def extract(
     with _mutation(workspace):
         manifest = _ensure_manifest(workspace)
         source = _source(manifest.source_id)
-        if workspace.exists():
+        if workspace.has_snapshot():
             try:
                 workspace.validate_snapshot(manifest)
             except WorkspaceConflict as exc:
                 raise typer.BadParameter(str(exc)) from exc
-            if workspace.has_semantic_state() and not reset_semantics:
+            if workspace.has_semantics() and not reset_semantics:
                 raise typer.BadParameter(
                     "refresh would discard semantic state; rerun with --reset-semantics"
                 )
@@ -151,15 +147,17 @@ def extract(
             incarnation_id=manifest.incarnation_id,
             generation=manifest.snapshot_generation,
         )
-        published = workspace.publish_snapshot(
+        published = workspace.publish(
             snapshot,
             reset_semantics=reset_semantics,
             expected_source_id=manifest.source_id,
             expected_incarnation_id=manifest.incarnation_id,
             expected_generation=manifest.snapshot_generation,
         )
+        # Names the workspace, not a file. Where the record is kept is the
+        # metadata store's decision and it will not always be a path.
         typer.echo(
-            f"{len(snapshot.tables)} tables -> {workspace.snapshot_path} "
+            f"{len(snapshot.tables)} tables -> {workspace.name} "
             f"(generation {published.snapshot_generation})"
         )
 
@@ -167,7 +165,7 @@ def extract(
 @app.command()
 def summary(workspace_name: str = typer.Argument(..., help="Workspace name")) -> None:
     """Print what was extracted, ranked by structural centrality."""
-    snapshot = _existing(workspace_name).read_current_snapshot()
+    snapshot = _existing(workspace_name).snapshot()
     ranked = sorted(
         snapshot.tables,
         key=lambda t: (snapshot.inbound_fk_count(t.name), t.row_count),
@@ -186,7 +184,7 @@ def summary(workspace_name: str = typer.Argument(..., help="Workspace name")) ->
 @app.command()
 def workspaces() -> None:
     """List workspaces and their bound sources."""
-    for name in Workspace.list_all():
+    for name in list_workspaces():
         workspace = _workspace(name)
         try:
             manifest = _ensure_manifest(workspace)
@@ -249,11 +247,11 @@ def analyze(
 
     workspace = _existing(workspace_name)
     with _mutation(workspace):
-        manifest = workspace.read_manifest()
+        manifest = workspace.manifest()
         source = _source(manifest.source_id)
         start_generation = manifest.snapshot_generation
-        snapshot = workspace.read_current_snapshot()
-        existing = workspace.read_facts()
+        snapshot = workspace.snapshot()
+        existing = workspace.facts()
         analyzed = completely_described_tables(snapshot, existing.facts)
         repairs = {} if regenerate else repair_columns_by_table(snapshot, existing.facts)
 
@@ -280,17 +278,16 @@ def analyze(
             incarnation_id=manifest.incarnation_id,
             generation=start_generation,
         )
-        merged = workspace.read_facts().merge(store.facts)
-        merged.write(workspace.facts_path)
-        questions.write(workspace.questions_path)
+        workspace.write_facts(workspace.facts().merge(store.facts))
+        workspace.write_questions(questions)
 
-        kept = workspace.read_evidence()
+        kept = workspace.evidence()
         for record in evidence.records:
             kept.add(record)
         kept.links.extend(evidence.links)
-        kept.write(workspace.evidence_path)
+        workspace.write_evidence(kept)
         typer.echo(
-            f"{len(store.facts)} claims, {len(questions.questions)} questions -> {workspace.root}"
+            f"{len(store.facts)} claims, {len(questions.questions)} questions -> {workspace.name}"
         )
 
 
@@ -311,17 +308,17 @@ def compile(
     workspace = _existing(workspace_name)
     with _mutation(workspace):
         document = build_output(
-            workspace.read_current_snapshot(),
-            workspace.read_facts(),
-            workspace.read_questions(),
-            workspace.read_evidence(),
+            workspace.snapshot(),
+            workspace.facts(),
+            workspace.questions().questions,
+            workspace.evidence(),
         )
-        document.write(workspace.output_path)
-        out = workspace.output_path
+        workspace.export_output(document)
         described = sum(1 for t in document.tables if t.description)
         with_grain = sum(1 for t in document.tables if t.grain)
         typer.echo(
-            f"{document.table_count} tables ({described} described, {with_grain} with grain) -> {out}"
+            f"{document.table_count} tables ({described} described, "
+            f"{with_grain} with grain) -> {workspace.name}"
         )
 
         if markdown:
@@ -336,7 +333,7 @@ def claims(workspace_name: str = typer.Argument(..., help="Workspace name")) -> 
     from atlas.output import assess_facts
 
     workspace = _existing(workspace_name)
-    store = assess_facts(workspace.read_facts(), workspace.read_evidence())
+    store = assess_facts(workspace.facts(), workspace.evidence())
     pending = store.needing_review()
     typer.echo(f"{len(store.facts)} facts, {len(pending)} awaiting review")
     for fact in pending[:20]:

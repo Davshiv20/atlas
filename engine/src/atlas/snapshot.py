@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field
 
 
@@ -124,11 +122,3 @@ class Snapshot(BaseModel):
             if fk.referred_table == table_name and t.name != table_name
         )
 
-    def write(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(mode="json", exclude_none=True)
-        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True))
-
-    @classmethod
-    def read(cls, path: Path) -> Snapshot:
-        return cls.model_validate(yaml.safe_load(path.read_text()))

@@ -24,10 +24,8 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
 
-import yaml
 from pydantic import BaseModel, Field, computed_field
 
 
@@ -283,13 +281,3 @@ class EvidenceStore(BaseModel):
             if pair[0].relationship is LinkKind.CONTRADICTS
         ]
 
-    def write(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = self.model_dump(mode="json", exclude_none=True)
-        path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True, width=100))
-
-    @classmethod
-    def read(cls, path: Path) -> EvidenceStore:
-        if not path.exists():
-            return cls()
-        return cls.model_validate(yaml.safe_load(path.read_text()) or {})

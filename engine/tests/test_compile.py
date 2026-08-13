@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from atlas.compile import render_markdown
 from atlas.facts import Fact, FactStatus, FactStore, Provenance, ProvenanceKind
+from atlas.metadata.yaml_store import YamlMetadataRepository
 from atlas.output import SchemaOutput, build_output
 from atlas.questions import Question
 from atlas.snapshot import Column, ColumnProfile, ForeignKey, Snapshot, Table, ValueCount
@@ -171,10 +173,14 @@ def test_analyzed_tables_sort_first(document) -> None:
     assert [t.name for t in document.tables] == ["orders", "audit_log"]
 
 
-def test_round_trip_through_disk(document, tmp_path) -> None:
-    path = tmp_path / "output.yaml"
-    document.write(path)
-    assert SchemaOutput.read(path) == document
+def test_the_exported_projection_is_the_document(document, tmp_path) -> None:
+    """Only ever written out. Nothing in Atlas reads it back — the projection
+    is rebuilt from the record per request — so what is asserted here is that
+    the export is faithful, not that it is a source."""
+    store = YamlMetadataRepository(tmp_path)
+    store.write_output("demo", document)
+    written = (tmp_path / "demo" / "output.yaml").read_text()
+    assert SchemaOutput.model_validate(yaml.safe_load(written)) == document
 
 
 # --- markdown view ---------------------------------------------------------

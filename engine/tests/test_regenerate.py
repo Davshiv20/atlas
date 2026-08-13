@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from atlas.catalog import Catalog
 from atlas.evidence import (
     Assertion,
     Authority,
@@ -20,7 +21,6 @@ from atlas.facts import Fact, FactStore, Provenance, ProvenanceKind
 from atlas.questions import Question, QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
-from atlas.workspace import Workspace, WorkspaceManifest
 
 NOW = datetime(2026, 8, 7, tzinfo=UTC)
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="executed", result="pass")
@@ -48,33 +48,31 @@ def evidence_for(relation: str, marker: int) -> EvidenceRecord:
     )
 
 
-def seed() -> Workspace:
-    workspace = Workspace("demo")
-    workspace.write_manifest(
-        WorkspaceManifest(id="demo", source_id="source", snapshot_generation=1)
-    )
-    Snapshot(
+def seed() -> Catalog:
+    workspace = Catalog("demo")
+    workspace.register("source")
+    snapshot = Snapshot(
         database="db",
         schema_name="public",
         dialect="postgresql",
-        source_id="source",
-        generation=1,
         tables=[
             Table(schema_name="public", name="orders", columns=[Column(name="id", data_type="int", nullable=False)]),
             Table(schema_name="public", name="customers", columns=[Column(name="id", data_type="int", nullable=False)]),
         ],
-    ).write(workspace.snapshot_path)
+    )
+    workspace.publish(snapshot)
     orders = evidence_for("orders", 1)
     customers = evidence_for("customers", 2)
 
-    FactStore(
+    facts = FactStore(
         facts=[
             Fact(subject="orders", aspect="grain", claim="One row per order.",
                  confidence=0.88, provenance=[CHECK]),
             Fact(subject="customers", aspect="grain", claim="One row per customer.",
                  confidence=0.88, provenance=[CHECK]),
         ]
-    ).write(workspace.facts_path)
+    )
+    workspace.write_facts(facts)
 
     store = EvidenceStore()
     store.add(orders)
@@ -83,14 +81,16 @@ def seed() -> Workspace:
                              relationship=LinkKind.SUPPORTS, rationale="x"))
     store.link(ClaimEvidence(claim_id="customers#grain", evidence_id=customers.id,
                              relationship=LinkKind.SUPPORTS, rationale="x"))
-    store.write(workspace.evidence_path)
+    workspace.write_evidence(store)
 
-    QuestionLog(
-        questions=[
-            Question(subject="orders.status", question="q", evidence="e", table="orders"),
-            Question(subject="customers.tier", question="q", evidence="e", table="customers"),
-        ]
-    ).write(workspace.questions_path)
+    workspace.write_questions(
+        QuestionLog(
+            questions=[
+                Question(subject="orders.status", question="q", evidence="e", table="orders"),
+                Question(subject="customers.tier", question="q", evidence="e", table="customers"),
+            ]
+        )
+    )
     return workspace
 
 
@@ -100,8 +100,8 @@ def test_regenerating_one_table_leaves_the_others_alone() -> None:
     removed = workspace.drop({"orders"})
 
     assert removed == {"claims": 1, "evidence": 1, "questions": 1}
-    assert [f.subject for f in workspace.read_facts().facts] == ["customers"]
-    assert [q.table for q in workspace.read_questions()] == ["customers"]
+    assert [f.subject for f in workspace.facts().facts] == ["customers"]
+    assert [q.table for q in workspace.questions().questions] == ["customers"]
 
 
 def test_evidence_is_replaced_not_accumulated() -> None:
@@ -109,14 +109,14 @@ def test_evidence_is_replaced_not_accumulated() -> None:
     marking which observation is current."""
     workspace = seed()
     workspace.drop({"orders"})
-    subjects = [s for r in workspace.read_evidence().records for s in r.subjects]
+    subjects = [s for r in workspace.evidence().records for s in r.subjects]
     assert subjects == ["relation:public.customers"]
 
 
 def test_links_to_dropped_evidence_do_not_dangle() -> None:
     workspace = seed()
     workspace.drop({"orders"})
-    store = workspace.read_evidence()
+    store = workspace.evidence()
     assert all(store.by_id(link.evidence_id) is not None for link in store.links)
     assert store.for_claim("orders#grain") == []
 
@@ -124,23 +124,23 @@ def test_links_to_dropped_evidence_do_not_dangle() -> None:
 def test_dropping_nothing_changes_nothing() -> None:
     workspace = seed()
     assert workspace.drop(set()) == {"claims": 0, "evidence": 0, "questions": 0}
-    assert len(workspace.read_facts().facts) == 2
+    assert len(workspace.facts().facts) == 2
 
 
 def test_column_scoped_claims_go_with_their_table() -> None:
     workspace = seed()
-    facts = workspace.read_facts()
+    facts = workspace.facts()
     facts.facts.append(
         Fact(subject="orders.status", aspect="semantics", claim="State.",
              confidence=0.88, provenance=[CHECK])
     )
-    facts.write(workspace.facts_path)
+    workspace.write_facts(facts)
 
     workspace.drop({"orders"})
-    assert [f.subject for f in workspace.read_facts().facts] == ["customers"]
+    assert [f.subject for f in workspace.facts().facts] == ["customers"]
 
 
 def test_evidence_survives_a_workspace_round_trip() -> None:
     workspace = seed()
-    assert len(workspace.read_evidence().records) == 2
-    assert len(workspace.read_evidence().links) == 2
+    assert len(workspace.evidence().records) == 2
+    assert len(workspace.evidence().links) == 2

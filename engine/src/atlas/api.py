@@ -26,11 +26,22 @@ from starlette.types import Scope
 from atlas.adapters.base import UnsupportedDatabase
 from atlas.adapters.registry import create_adapter
 from atlas.answers import record_answer
+from atlas.catalog import (
+    Catalog,
+    WorkspaceConflict,
+    referencing_source,
+)
+
+# Aliased: `list_workspaces` is also the name of the route below, and the route
+# is the name that belongs to the URL.
+from atlas.catalog import list_workspaces as all_workspace_names
 from atlas.decisions import record_decision
 from atlas.facts import Consequence, Fact, FactStatus, FactStore
 from atlas.jobs import ActiveWorkspaceJob, Job, JobProgress, ProgressReporter, get_registry
-from atlas.output import assess_facts, build_output
-from atlas.questions import Question, QuestionLog
+from atlas.manifest import InvalidWorkspace, WorkspaceManifest
+from atlas.metadata import WorkspaceBusy
+from atlas.output import SchemaOutput, assess_facts, build_output
+from atlas.questions import Question
 from atlas.secrets import clear_secret, has_secret, load_into_environment, set_secret
 from atlas.semantic_view import build_semantic_view, render_yaml
 from atlas.settings import get_settings
@@ -40,13 +51,6 @@ from atlas.sources import (
     SourceNotFound,
     SourceRegistry,
     source_registry_lock,
-)
-from atlas.workspace import (
-    InvalidWorkspace,
-    Workspace,
-    WorkspaceBusy,
-    WorkspaceConflict,
-    WorkspaceManifest,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,17 +132,17 @@ class ReviewRequest(BaseModel):
 # --- helpers ---------------------------------------------------------------
 
 
-def _workspace(name: str) -> Workspace:
+def _workspace(name: str) -> Catalog:
     try:
-        return Workspace(name)
+        return Catalog(name)
     except InvalidWorkspace as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def _existing(name: str) -> Workspace:
+def _existing(name: str) -> Catalog:
     workspace = _workspace(name)
     _ensure_manifest(workspace)
-    if not workspace.exists():
+    if not workspace.has_snapshot():
         raise HTTPException(
             status_code=404, detail=f"workspace {name!r} has no snapshot; run extract first"
         )
@@ -146,12 +150,12 @@ def _existing(name: str) -> Workspace:
     return workspace
 
 
-def _ensure_manifest(workspace: Workspace) -> WorkspaceManifest:
-    if workspace.has_manifest():
-        return workspace.read_manifest()
-    if not workspace.snapshot_path.exists():
+def _ensure_manifest(workspace: Catalog) -> WorkspaceManifest:
+    if workspace.is_registered():
+        return workspace.manifest()
+    if not workspace.has_snapshot():
         raise HTTPException(status_code=404, detail=f"workspace {workspace.name!r} does not exist")
-    snapshot = workspace.read_snapshot()
+    snapshot = workspace.unchecked_snapshot()
     if not snapshot.source_id:
         raise HTTPException(
             status_code=409,
@@ -172,19 +176,19 @@ def _ensure_manifest(workspace: Workspace) -> WorkspaceManifest:
                 ),
             ) from exc
         try:
-            return workspace.migrate_legacy(snapshot.source_id)
+            return workspace.adopt(snapshot.source_id)
         except WorkspaceConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _ensure_current(workspace: Workspace) -> None:
+def _ensure_current(workspace: Catalog) -> None:
     try:
-        workspace.read_current_snapshot()
+        workspace.snapshot()
     except WorkspaceConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _bound_source(workspace: Workspace) -> Source:
+def _bound_source(workspace: Catalog) -> Source:
     manifest = _ensure_manifest(workspace)
     try:
         return SourceRegistry.read().get(manifest.source_id)
@@ -213,12 +217,12 @@ def _active_job_conflict(exc: ActiveWorkspaceJob) -> HTTPException:
 
 
 def _submit_mutation(
-    kind: str, workspace: Workspace, manifest: WorkspaceManifest, work
+    kind: str, workspace: Catalog, manifest: WorkspaceManifest, work
 ) -> Job:
     registry = get_registry()
 
     def guarded_work(report: ProgressReporter) -> dict:
-        with workspace.mutation_lock():
+        with workspace.mutation():
             return work(report)
 
     active = registry.active_workspace_job(workspace.name)
@@ -227,7 +231,7 @@ def _submit_mutation(
     try:
         with (
             registry.workspace_guard(workspace.name),
-            workspace.mutation_lock(blocking=False),
+            workspace.mutation(blocking=False),
         ):
             workspace.assert_identity(
                 source_id=manifest.source_id,
@@ -262,7 +266,7 @@ def _workspace_write_guard(name: str) -> Iterator[None]:
         if active:
             raise _active_job_conflict(ActiveWorkspaceJob(active.id))
         try:
-            with Workspace(name).mutation_lock(blocking=False):
+            with Catalog(name).mutation(blocking=False):
                 yield
         except WorkspaceBusy as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -595,7 +599,7 @@ def forget_credentials(source_id: str) -> None:
 @app.delete("/sources/{source_id}", status_code=204, tags=["sources"])
 def delete_source(source_id: str) -> None:
     with source_registry_lock():
-        referenced = Workspace.referencing_source(source_id)
+        referenced = referencing_source(source_id)
         if referenced:
             raise HTTPException(
                 status_code=409,
@@ -644,9 +648,9 @@ def _workspace_summary(name: str) -> WorkspaceSummary:
     workspace = _workspace(name)
     manifest = _ensure_manifest(workspace)
     snapshot = None
-    if workspace.exists():
+    if workspace.has_snapshot():
         _ensure_current(workspace)
-        snapshot = workspace.read_snapshot()
+        snapshot = workspace.unchecked_snapshot()
     try:
         source = SourceRegistry.read().get(manifest.source_id)
     except SourceNotFound:
@@ -684,7 +688,7 @@ def create_workspace(request: CreateWorkspaceRequest) -> WorkspaceSummary:
             SourceRegistry.read().get(request.source_id)
         except SourceNotFound as exc:
             raise HTTPException(status_code=404, detail=f"no source {request.source_id!r}") from exc
-        referenced = Workspace.referencing_source(request.source_id)
+        referenced = referencing_source(request.source_id)
         if referenced and request.id not in referenced:
             raise HTTPException(
                 status_code=409,
@@ -695,7 +699,7 @@ def create_workspace(request: CreateWorkspaceRequest) -> WorkspaceSummary:
             )
         workspace = _workspace(request.id)
         try:
-            workspace.create_manifest(request.source_id)
+            workspace.register(request.source_id)
         except WorkspaceConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _workspace_summary(workspace.name)
@@ -703,7 +707,7 @@ def create_workspace(request: CreateWorkspaceRequest) -> WorkspaceSummary:
 
 @app.get("/workspaces", tags=["workspaces"])
 def list_workspaces() -> dict[str, list[WorkspaceSummary]]:
-    return {"workspaces": [_workspace_summary(name) for name in Workspace.list_all()]}
+    return {"workspaces": [_workspace_summary(name) for name in all_workspace_names()]}
 
 
 @app.delete("/workspaces/{name}", status_code=204, tags=["workspaces"])
@@ -722,9 +726,9 @@ def extract(name: str, request: ExtractRequest = Body(default=ExtractRequest()))
     manifest = _ensure_manifest(workspace)
     source = _bound_source(workspace)
     url = _source_url(source)
-    if workspace.exists():
+    if workspace.has_snapshot():
         _ensure_current(workspace)
-        if workspace.has_semantic_state() and not request.reset_semantics:
+        if workspace.has_semantics() and not request.reset_semantics:
             raise HTTPException(
                 status_code=409,
                 detail=(
@@ -769,16 +773,18 @@ def extract(name: str, request: ExtractRequest = Body(default=ExtractRequest()))
             incarnation_id=manifest.incarnation_id,
             generation=start_generation,
         )
-        published = workspace.publish_snapshot(
+        published = workspace.publish(
             snapshot,
             reset_semantics=request.reset_semantics,
             expected_source_id=manifest.source_id,
             expected_incarnation_id=manifest.incarnation_id,
             expected_generation=start_generation,
         )
+        # No path in the result. Where the record physically sits is the
+        # metadata store's business, and a caller told about it is a caller
+        # that will eventually read it.
         return {
             "tables": len(snapshot.tables),
-            "path": str(workspace.snapshot_path),
             "snapshot_generation": published.snapshot_generation,
         }
 
@@ -798,7 +804,7 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
     from atlas.relationships import as_claims, by_table, discover
 
     workspace = _existing(name)
-    manifest = workspace.read_manifest()
+    manifest = workspace.manifest()
     source = _bound_source(workspace)
     url = _source_url(source)
     start_generation = manifest.snapshot_generation
@@ -818,8 +824,8 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
 
     def work(report: ProgressReporter) -> dict:
         assert_current()
-        snapshot = workspace.read_current_snapshot()
-        existing = workspace.read_facts()
+        snapshot = workspace.snapshot()
+        existing = workspace.facts()
         # A table is complete only when every physical column has a semantics
         # claim. Counting any non-join fact as "analyzed" made an early model
         # finish permanent: the warning named missing columns, but every later
@@ -921,11 +927,11 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         assert_current()
         document = build_output(
             snapshot,
-            workspace.read_facts(),
-            workspace.read_questions(),
-            workspace.read_evidence(),
+            workspace.facts(),
+            workspace.questions().questions,
+            workspace.evidence(),
         )
-        document.write(workspace.output_path)
+        workspace.export_output(document)
         return {
             "claims": len(store.facts),
             "questions": len(questions.questions),
@@ -938,7 +944,6 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             # than silently thin.
             "partial": partial,
             "skipped": sorted(analyzed - {t.name for t in selected}),
-            "output": str(workspace.output_path),
         }
 
     return _submit_mutation("analyze", workspace, manifest, work)
@@ -948,14 +953,21 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
 def compile_output(name: str, _guard: None = Depends(_workspace_write_guard)) -> dict:
     """Rebuild output.yaml from the stored snapshot and claims. Fast; inline."""
     workspace = _existing(name)
-    document = build_output(
-        workspace.read_current_snapshot(),
-        workspace.read_facts(),
-        workspace.read_questions(),
-        workspace.read_evidence(),
-    )
-    document.write(workspace.output_path)
+    document = _build(workspace)
+    workspace.export_output(document)
     return {"tables": document.table_count, "claims": document.claim_count}
+
+
+def _build(workspace: Catalog) -> SchemaOutput:
+    """The projection, from the stored record. Rebuilt per request: serving a
+    cached copy means a reviewer approves a claim and the catalogue still shows
+    it as generated, and the UI is the one that looks broken."""
+    return build_output(
+        workspace.snapshot(),
+        workspace.facts(),
+        workspace.questions().questions,
+        workspace.evidence(),
+    )
 
 
 # --- reading ---------------------------------------------------------------
@@ -970,14 +982,7 @@ def get_output(name: str) -> dict:
     generated — the two stores disagree and the UI is the one that looks broken.
     `compile` still writes output.yaml, but as an export, not a source.
     """
-    workspace = _existing(name)
-    document = build_output(
-        workspace.read_current_snapshot(),
-        workspace.read_facts(),
-        workspace.read_questions(),
-        workspace.read_evidence(),
-    )
-    return document.model_dump(mode="json", exclude_none=True)
+    return _build(_existing(name)).model_dump(mode="json", exclude_none=True)
 
 
 @app.get("/workspaces/{name}/semantic-view", tags=["catalogue"])
@@ -990,14 +995,7 @@ def get_semantic_view(name: str, table: str | None = None) -> dict:
     rendered YAML are returned, because the console shows the second and an
     agent consumes the first.
     """
-    workspace = _existing(name)
-    document = build_output(
-        workspace.read_current_snapshot(),
-        workspace.read_facts(),
-        workspace.read_questions(),
-        workspace.read_evidence(),
-    )
-    view = build_semantic_view(document)
+    view = build_semantic_view(_build(_existing(name)))
     if table and not any(t.name == table for t in view.tables):
         raise HTTPException(status_code=404, detail=f"{table!r} has not been analysed")
     return {
@@ -1010,7 +1008,7 @@ def get_semantic_view(name: str, table: str | None = None) -> dict:
 
 @app.get("/workspaces/{name}/questions", tags=["review"])
 def get_questions(name: str) -> dict[str, list[Question]]:
-    return {"questions": _existing(name).read_questions()}
+    return {"questions": _existing(name).questions().questions}
 
 
 class AnswerRequest(BaseModel):
@@ -1033,7 +1031,7 @@ def answer_question(
     in the catalogue sat at 0.65 with no mechanism able to move it.
     """
     workspace = _existing(name)
-    log = QuestionLog(questions=workspace.read_questions())
+    log = workspace.questions()
     question = log.get(question_id)
     if question is None:
         raise HTTPException(status_code=404, detail=f"no question {question_id!r}")
@@ -1044,12 +1042,10 @@ def answer_question(
         )
 
     settled = question.answered(request.answer, request.reviewer)
-    facts, evidence, claim = record_answer(
-        settled, workspace.read_facts(), workspace.read_evidence()
-    )
-    facts.write(workspace.facts_path)
-    evidence.write(workspace.evidence_path)
-    log.replace(settled).write(workspace.questions_path)
+    facts, evidence, claim = record_answer(settled, workspace.facts(), workspace.evidence())
+    workspace.write_facts(facts)
+    workspace.write_evidence(evidence)
+    workspace.write_questions(log.replace(settled))
     return {"question": settled.model_dump(mode="json"), "claim": claim.model_dump(mode="json")}
 
 
@@ -1067,13 +1063,13 @@ def dismiss_question(
     column is dead, the distinction does not matter here, or nobody knows.
     """
     workspace = _existing(name)
-    log = QuestionLog(questions=workspace.read_questions())
+    log = workspace.questions()
     question = log.get(question_id)
     if question is None:
         raise HTTPException(status_code=404, detail=f"no question {question_id!r}")
 
     settled = question.dismissed(request.answer, request.reviewer)
-    log.replace(settled).write(workspace.questions_path)
+    workspace.write_questions(log.replace(settled))
     return {"question": settled.model_dump(mode="json")}
 
 
@@ -1082,7 +1078,7 @@ def get_claims(name: str, status: FactStatus | None = None) -> dict:
     """Claims, highest-impact first: least certain at the top, since a claim
     nobody doubts is not worth a reviewer's attention."""
     workspace = _existing(name)
-    facts = assess_facts(workspace.read_facts(), workspace.read_evidence()).facts
+    facts = assess_facts(workspace.facts(), workspace.evidence()).facts
     if status:
         facts = [f for f in facts if f.status is status]
 
@@ -1119,12 +1115,12 @@ def review_claim(
     as `authoritative`, and the emitted view says which.
     """
     workspace = _existing(name)
-    store = workspace.read_facts()
+    store = workspace.facts()
     existing = store.by_id(claim_id)
     if existing is None:
         raise HTTPException(status_code=404, detail=f"no claim {claim_id!r}")
 
-    evidence = workspace.read_evidence()
+    evidence = workspace.evidence()
     updated, evidence = record_decision(
         existing,
         evidence,
@@ -1133,9 +1129,9 @@ def review_claim(
         text=request.claim,
     )
 
-    evidence.write(workspace.evidence_path)
-    FactStore(facts=[f for f in store.facts if f.id != claim_id] + [updated]).write(
-        workspace.facts_path
+    workspace.write_evidence(evidence)
+    workspace.write_facts(
+        FactStore(facts=[f for f in store.facts if f.id != claim_id] + [updated])
     )
     return updated
 

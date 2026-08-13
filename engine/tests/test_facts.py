@@ -10,6 +10,7 @@ from atlas.facts import (
     Provenance,
     ProvenanceKind,
 )
+from atlas.metadata.yaml_store import YamlMetadataRepository
 from atlas.policy import Trust, TrustAssessment, TrustFactors
 
 LLM = Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="inferred from column name")
@@ -64,9 +65,9 @@ def test_confidence_must_match_the_stored_trust_assessment() -> None:
 
 def test_trust_assessment_round_trips_with_the_fact(tmp_path) -> None:
     fact = make_fact(confidence=0.84, trust=assessment(), provenance=[CHECK])
-    path = tmp_path / "facts.yaml"
-    FactStore(facts=[fact]).write(path)
-    loaded = FactStore.read(path).facts[0]
+    store = YamlMetadataRepository(tmp_path)
+    store.write_facts("demo", FactStore(facts=[fact]))
+    loaded = store.read_facts("demo").facts[0]
     assert loaded.trust == fact.trust
     assert loaded.trust is not None
     assert loaded.trust.band.value == "strongly_supported"
@@ -103,14 +104,14 @@ def test_merge_resets_verdict_when_claim_changed() -> None:
     assert merged.supersedes == f"deliverables.stage#semantics@{verified.claim_hash}"
 
 
-def test_round_trip_through_disk(tmp_path) -> None:
-    path = tmp_path / "facts.yaml"
-    FactStore(facts=[make_fact()]).write(path)
-    assert FactStore.read(path).facts == [make_fact()]
+def test_round_trip_through_the_store(tmp_path) -> None:
+    store = YamlMetadataRepository(tmp_path)
+    store.write_facts("demo", FactStore(facts=[make_fact()]))
+    assert store.read_facts("demo").facts == [make_fact()]
 
 
-def test_read_missing_store_is_empty(tmp_path) -> None:
-    assert FactStore.read(tmp_path / "absent.yaml").facts == []
+def test_reading_a_workspace_with_no_claims_is_empty(tmp_path) -> None:
+    assert YamlMetadataRepository(tmp_path).read_facts("demo").facts == []
 
 
 # --- plural aspects need a discriminator -----------------------------------
@@ -161,27 +162,37 @@ def test_id_is_two_parts_without_a_discriminator() -> None:
 def test_legacy_claims_still_load_and_are_marked(tmp_path, caplog) -> None:
     """Pre-discriminator catalogues must stay readable — but the assigned id
     carries `legacy-`, because such a claim may be several findings in one."""
-    path = tmp_path / "facts.yaml"
-    path.write_text(
-        "facts:\n"
+    stored = _stored_claims(
+        tmp_path,
         "- subject: conversations\n"
         "  aspect: join\n"
         "  claim: 'Join paths: a = b, c = d, e = f.'\n"
         "  confidence: 0.5\n"
         "  provenance:\n"
         "  - kind: llm_inference\n"
-        "    detail: inferred\n"
+        "    detail: inferred\n",
     )
-    store = FactStore.read(path)
-    assert len(store.facts) == 1
-    assert store.facts[0].id.startswith("conversations#join#legacy-")
+    assert len(stored.facts) == 1
+    assert stored.facts[0].id.startswith("conversations#join#legacy-")
 
 
 def test_legacy_migration_is_stable_across_reads(tmp_path) -> None:
-    path = tmp_path / "facts.yaml"
-    path.write_text(
-        "facts:\n"
+    raw = (
         "- subject: orders\n  aspect: quality\n  claim: Something.\n  confidence: 0.5\n"
         "  provenance:\n  - kind: llm_inference\n    detail: inferred\n"
     )
-    assert FactStore.read(path).facts[0].id == FactStore.read(path).facts[0].id
+    first = _stored_claims(tmp_path, raw).facts[0].id
+    assert first == _stored_claims(tmp_path, raw).facts[0].id
+
+
+def _stored_claims(root, entries: str) -> FactStore:
+    """Read claims the store finds already on disk.
+
+    Written as text rather than through `write_facts` on purpose: the point is
+    what happens to a file some older version of Atlas left behind, and the
+    current writer cannot produce one.
+    """
+    path = root / "demo" / "facts.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("facts:\n" + entries)
+    return YamlMetadataRepository(root).read_facts("demo")

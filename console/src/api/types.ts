@@ -246,7 +246,6 @@ export interface AnalyzeResult {
   /** Tables the model was cut off on: their reading is partial. */
   partial?: string[];
   discarded?: Record<string, number>;
-  output?: string;
 }
 
 export interface Job {

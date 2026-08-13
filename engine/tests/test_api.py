@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from atlas.api import app
+from atlas.catalog import Catalog
 from atlas.evidence import EvidenceStore
 from atlas.facts import Fact, FactStatus, FactStore, Provenance, ProvenanceKind
 from atlas.jobs import (
@@ -15,11 +16,11 @@ from atlas.jobs import (
     ProgressReporter,
     get_registry,
 )
+from atlas.manifest import InvalidWorkspace
 from atlas.questions import QuestionLog
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
 from atlas.sources import Source, SourceRegistry
-from atlas.workspace import InvalidWorkspace, Workspace, WorkspaceManifest
 
 CHECK = Provenance(kind=ProvenanceKind.GROUNDED_CHECK, detail="executed: SELECT 1", result="pass")
 GUESS = Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from column name")
@@ -62,14 +63,12 @@ def register_source(url_env: str = "ELARA_DATABASE_URL") -> None:
     SourceRegistry(sources=[Source(id="elara", adapter="postgresql", url_env=url_env)]).write()
 
 
-def seed(name: str = "demo") -> Workspace:
-    workspace = Workspace(name)
+def seed(name: str = "demo") -> Catalog:
+    workspace = Catalog(name)
     snapshot = Snapshot(
         database="shop",
         schema_name="public",
         dialect="postgresql",
-        source_id="elara",
-        generation=1,
         tables=[
             Table(
                 schema_name="public",
@@ -79,26 +78,28 @@ def seed(name: str = "demo") -> Workspace:
             )
         ],
     )
-    workspace.write_manifest(WorkspaceManifest(id=name, source_id="elara", snapshot_generation=1))
-    snapshot.write(workspace.snapshot_path)
-    FactStore(
-        facts=[
-            Fact(
-                subject="orders",
-                aspect="grain",
-                claim="One row per order.",
-                confidence=0.92,
-                provenance=[GUESS, CHECK],
-            ),
-            Fact(
-                subject="orders.status",
-                aspect="semantics",
-                claim="Lifecycle state.",
-                confidence=0.45,
-                provenance=[GUESS],
-            ),
-        ]
-    ).write(workspace.facts_path)
+    workspace.register("elara")
+    workspace.publish(snapshot)
+    workspace.write_facts(
+        FactStore(
+            facts=[
+                Fact(
+                    subject="orders",
+                    aspect="grain",
+                    claim="One row per order.",
+                    confidence=0.92,
+                    provenance=[GUESS, CHECK],
+                ),
+                Fact(
+                    subject="orders.status",
+                    aspect="semantics",
+                    claim="Lifecycle state.",
+                    confidence=0.45,
+                    provenance=[GUESS],
+                ),
+            ]
+        )
+    )
     return workspace
 
 
@@ -117,7 +118,7 @@ def test_config_never_returns_the_key(client, monkeypatch) -> None:
 def test_workspace_names_are_validated_not_sanitized() -> None:
     for bad in ["../etc", "Has Caps", "", "a" * 64, "with/slash"]:
         with pytest.raises(InvalidWorkspace):
-            Workspace(bad)
+            Catalog(bad)
 
 
 def test_traversal_name_is_rejected_by_the_api(client) -> None:
@@ -193,7 +194,7 @@ def test_review_persists(client) -> None:
         "/workspaces/demo/claims/orders%23grain/review",
         json={"decision": "verified", "reviewer": "shivam", "claim": "One row per issued order."},
     )
-    stored = FactStore.read(workspace.facts_path).by_id("orders#grain")
+    stored = workspace.facts().by_id("orders#grain")
     assert stored.status is FactStatus.VERIFIED
     assert stored.claim == "One row per issued order."
     assert stored.verified_by == "shivam"
@@ -249,10 +250,10 @@ def test_unknown_job_is_404(client) -> None:
 # --- review at scale -------------------------------------------------------
 
 
-def seed_wide(name: str = "wide") -> Workspace:
+def seed_wide(name: str = "wide") -> Catalog:
     """A table shaped like the problem: a handful of meaningful columns buried
     in dozens whose meaning their type already fixes."""
-    workspace = Workspace(name)
+    workspace = Catalog(name)
     columns = [Column(name="id", data_type="VARCHAR", nullable=False, is_primary_key=True)]
     columns += [
         Column(name=f"{stem}_at", data_type="VARCHAR", nullable=True)
@@ -262,19 +263,17 @@ def seed_wide(name: str = "wide") -> Workspace:
         Column(name="status", data_type="VARCHAR", nullable=False),
         Column(name="amount_cents", data_type="INTEGER", nullable=False),
     ]
-    workspace.write_manifest(
-        WorkspaceManifest(id=name, source_id="elara", snapshot_generation=1)
+    workspace.register("elara")
+    workspace.publish(
+        Snapshot(
+            database="shop",
+            schema_name="public",
+            dialect="postgresql",
+            tables=[
+                Table(schema_name="public", name="orders", columns=columns, exact_rows=100)
+            ],
+        )
     )
-    Snapshot(
-        database="shop",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="elara",
-        generation=1,
-        tables=[
-            Table(schema_name="public", name="orders", columns=columns, exact_rows=100)
-        ],
-    ).write(workspace.snapshot_path)
 
     facts = [
         Fact(
@@ -298,7 +297,7 @@ def seed_wide(name: str = "wide") -> Workspace:
             consequence="high",
         )
     )
-    FactStore(facts=facts).write(workspace.facts_path)
+    workspace.write_facts(FactStore(facts=facts))
     return workspace
 
 
@@ -313,7 +312,7 @@ def test_class_review_never_overwrites_a_deliberate_decision(client) -> None:
         "/workspaces/wide/classes/audit_timestamp:varchar/review",
         json={"decision": "verified", "reviewer": "someone-else"},
     )
-    stored = FactStore.read(workspace.facts_path).by_id("orders.created_at#semantics")
+    stored = workspace.facts().by_id("orders.created_at#semantics")
     assert stored.status is FactStatus.REJECTED
 
 
@@ -538,7 +537,7 @@ def test_a_finished_table_is_readable_before_the_run_ends(client, monkeypatch) -
             sink = AnalysisSink(facts=[_fact(name)])
             kwargs["on_table_done"](name, sink)
             # What a reader would see right now, mid-run.
-            observed.append(sorted({f.subject for f in workspace.read_facts().facts}))
+            observed.append(sorted({f.subject for f in workspace.facts().facts}))
         return FactStore(), QuestionLog(), EvidenceStore()
 
     register_source()

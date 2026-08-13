@@ -16,9 +16,7 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from enum import StrEnum
-from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field, computed_field
 
 
@@ -110,14 +108,3 @@ class QuestionLog(BaseModel):
     def open(self) -> list[Question]:
         return [q for q in self.questions if not q.settled]
 
-    def write(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            yaml.safe_dump(self.model_dump(mode="json"), sort_keys=False, allow_unicode=True)
-        )
-
-    @classmethod
-    def read(cls, path: Path) -> QuestionLog:
-        if not path.exists():
-            return cls()
-        return cls.model_validate(yaml.safe_load(path.read_text()) or {})

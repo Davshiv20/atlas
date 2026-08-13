@@ -8,13 +8,15 @@ from fastapi.testclient import TestClient
 
 from atlas import api
 from atlas.api import app
+from atlas.catalog import Catalog, WorkspaceConflict
 from atlas.evidence import EvidenceStore
 from atlas.facts import Fact, FactStore, Provenance, ProvenanceKind
 from atlas.jobs import TERMINAL, Job, get_registry
+from atlas.metadata import yaml_store
+from atlas.metadata.yaml_store import YamlMetadataRepository
 from atlas.settings import get_settings
 from atlas.snapshot import Column, Snapshot, Table
 from atlas.sources import Source, SourceRegistry
-from atlas.workspace import Workspace, WorkspaceConflict, WorkspaceManifest
 
 
 @pytest.fixture(autouse=True)
@@ -89,6 +91,46 @@ class FakeAdapter:
         return snapshot
 
 
+def seed_legacy(name: str, snapshot: Snapshot) -> Catalog:
+    """Write a workspace the way Atlas wrote them before manifests existed.
+
+    Reaches into the YAML store on purpose: this is the only shape of data the
+    adoption path exists for, and no port method can produce it.
+    """
+    root = get_settings().atlas_output_dir / name
+    yaml_store._write_snapshot(root / yaml_store.SNAPSHOT, snapshot)
+    return Catalog(name)
+
+
+def seed_reviewed(name: str, source_id: str, table_name: str, claim: str) -> Catalog:
+    """A workspace at generation 1 with one claim on it — the state a refresh
+    is not allowed to discard silently."""
+    workspace = Catalog(name)
+    workspace.register(source_id)
+    workspace.publish(
+        Snapshot(
+            database="old",
+            schema_name="public",
+            dialect="postgresql",
+            tables=[table(table_name, "public")],
+        )
+    )
+    workspace.write_facts(
+        FactStore(
+            facts=[
+                Fact(
+                    subject=table_name,
+                    aspect="grain",
+                    claim=claim,
+                    confidence=0.5,
+                    provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="test")],
+                )
+            ]
+        )
+    )
+    return workspace
+
+
 def finish(job: dict) -> Job:
     parsed = Job.model_validate(job)
     while (current := get_registry().get(parsed.id)).status not in TERMINAL:
@@ -112,8 +154,8 @@ def test_postgres_and_snowflake_workspaces_keep_independent_snapshots(
     finish(client.post("/workspaces/pg-review/extract", json={}).json())
     finish(client.post("/workspaces/sf-review/extract", json={}).json())
 
-    pg = Workspace("pg-review").read_current_snapshot()
-    sf = Workspace("sf-review").read_current_snapshot()
+    pg = Catalog("pg-review").snapshot()
+    sf = Catalog("sf-review").snapshot()
     assert (pg.source_id, pg.generation, [t.name for t in pg.tables]) == ("pg", 1, ["orders"])
     assert (sf.source_id, sf.generation, [t.name for t in sf.tables]) == ("sf", 1, ["accounts"])
 
@@ -127,7 +169,7 @@ def test_workspace_source_binding_cannot_change(client) -> None:
     response = client.post("/workspaces", json={"id": "review", "source_id": "sf"})
 
     assert response.status_code == 409
-    assert Workspace("review").read_manifest().source_id == "pg"
+    assert Catalog("review").manifest().source_id == "pg"
 
 
 def test_one_source_cannot_be_bound_to_two_workspaces(client) -> None:
@@ -150,7 +192,7 @@ def test_stale_extract_cannot_publish_after_delete_and_recreate(client, monkeypa
     assert client.post(
         "/workspaces", json={"id": "review", "source_id": "pg"}
     ).status_code == 201
-    old_incarnation = Workspace("review").read_manifest().incarnation_id
+    old_incarnation = Catalog("review").manifest().incarnation_id
     entered = threading.Event()
     release = threading.Event()
     original_submit = api._submit_mutation
@@ -173,14 +215,14 @@ def test_stale_extract_cannot_publish_after_delete_and_recreate(client, monkeypa
     assert client.post(
         "/workspaces", json={"id": "review", "source_id": "sf"}
     ).status_code == 201
-    new_manifest = Workspace("review").read_manifest()
+    new_manifest = Catalog("review").manifest()
     assert new_manifest.incarnation_id != old_incarnation
     release.set()
     extracting.join(timeout=5)
 
     assert response["extract"].status_code == 409
-    assert not Workspace("review").exists()
-    assert Workspace("review").read_manifest().source_id == "sf"
+    assert not Catalog("review").has_snapshot()
+    assert Catalog("review").manifest().source_id == "sf"
 
 
 def test_managed_extract_rejects_source_rebinding_fields(client) -> None:
@@ -195,30 +237,34 @@ def test_managed_extract_rejects_source_rebinding_fields(client) -> None:
 
 def test_legacy_workspace_migrates_only_with_unambiguous_snapshot_source(client) -> None:
     declare_sources()
-    legacy = Workspace("legacy")
-    Snapshot(
-        database="pgdb",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        tables=[table("orders", "public")],
-    ).write(legacy.snapshot_path)
+    legacy = seed_legacy(
+        "legacy",
+        Snapshot(
+            database="pgdb",
+            schema_name="public",
+            dialect="postgresql",
+            source_id="pg",
+            tables=[table("orders", "public")],
+        ),
+    )
 
     body = client.get("/workspaces").json()["workspaces"]
     assert body[0]["id"] == "legacy"
     assert body[0]["source_id"] == "pg"
-    assert legacy.read_manifest().snapshot_generation == 1
-    assert legacy.read_snapshot().generation == 1
+    assert legacy.manifest().snapshot_generation == 1
+    assert legacy.snapshot().generation == 1
 
 
 def test_ambiguous_legacy_workspace_is_refused(client) -> None:
-    legacy = Workspace("legacy")
-    Snapshot(
-        database="pgdb",
-        schema_name="public",
-        dialect="postgresql",
-        tables=[table("orders", "public")],
-    ).write(legacy.snapshot_path)
+    seed_legacy(
+        "legacy",
+        Snapshot(
+            database="pgdb",
+            schema_name="public",
+            dialect="postgresql",
+            tables=[table("orders", "public")],
+        ),
+    )
 
     response = client.get("/workspaces")
     assert response.status_code == 409
@@ -230,37 +276,17 @@ def test_refresh_requires_semantic_reset_and_advances_generation(client, monkeyp
     monkeypatch.setenv("PG_URL", "postgresql://pg")
     get_settings.cache_clear()
     monkeypatch.setattr(api, "create_adapter", lambda url, **_: FakeAdapter(url))
-    workspace = Workspace("pg-review")
-    workspace.write_manifest(WorkspaceManifest(id="pg-review", source_id="pg", snapshot_generation=1))
-    Snapshot(
-        database="old",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        generation=1,
-        tables=[table("old_orders", "public")],
-    ).write(workspace.snapshot_path)
-    FactStore(
-        facts=[
-            Fact(
-                subject="old_orders",
-                aspect="grain",
-                claim="Old semantic state.",
-                confidence=0.5,
-                provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="test")],
-            )
-        ]
-    ).write(workspace.facts_path)
-    EvidenceStore().write(workspace.evidence_path)
+    workspace = seed_reviewed("pg-review", "pg", "old_orders", "Old semantic state.")
+    workspace.write_evidence(EvidenceStore())
 
     conflict = client.post("/workspaces/pg-review/extract", json={})
     assert conflict.status_code == 409
     assert "reset_semantics=true" in conflict.json()["detail"]
 
     finish(client.post("/workspaces/pg-review/extract", json={"reset_semantics": True}).json())
-    assert not workspace.facts_path.exists()
-    assert workspace.read_manifest().snapshot_generation == 2
-    assert workspace.read_current_snapshot().generation == 2
+    assert not workspace.has_semantics()
+    assert workspace.manifest().snapshot_generation == 2
+    assert workspace.snapshot().generation == 2
 
 
 def test_failed_refresh_preserves_the_previous_snapshot_and_semantics(client, monkeypatch) -> None:
@@ -272,29 +298,7 @@ def test_failed_refresh_preserves_the_previous_snapshot_and_semantics(client, mo
     monkeypatch.setenv("PG_URL", "postgresql://pg")
     get_settings.cache_clear()
     monkeypatch.setattr(api, "create_adapter", lambda url, **_: FailingAdapter(url))
-    workspace = Workspace("pg-review")
-    workspace.write_manifest(
-        WorkspaceManifest(id="pg-review", source_id="pg", snapshot_generation=1)
-    )
-    Snapshot(
-        database="old",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        generation=1,
-        tables=[table("old_orders", "public")],
-    ).write(workspace.snapshot_path)
-    FactStore(
-        facts=[
-            Fact(
-                subject="old_orders",
-                aspect="grain",
-                claim="Old semantic state.",
-                confidence=0.5,
-                provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="test")],
-            )
-        ]
-    ).write(workspace.facts_path)
+    workspace = seed_reviewed("pg-review", "pg", "old_orders", "Old semantic state.")
 
     submitted = Job.model_validate(
         client.post(
@@ -305,93 +309,75 @@ def test_failed_refresh_preserves_the_previous_snapshot_and_semantics(client, mo
         pass
 
     assert current.status == "failed"
-    assert workspace.read_current_snapshot().tables[0].name == "old_orders"
-    assert workspace.read_facts().facts[0].claim == "Old semantic state."
+    assert workspace.snapshot().tables[0].name == "old_orders"
+    assert workspace.facts().facts[0].claim == "Old semantic state."
 
 
 def test_refresh_commits_the_generation_pointer_last(monkeypatch) -> None:
-    workspace = Workspace("pg-review")
-    workspace.write_manifest(
-        WorkspaceManifest(id="pg-review", source_id="pg", snapshot_generation=1)
-    )
-    Snapshot(
-        database="old",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        generation=1,
-        tables=[table("old_orders", "public")],
-    ).write(workspace.snapshot_path)
-    FactStore(
-        facts=[
-            Fact(
-                subject="old_orders",
-                aspect="grain",
-                claim="Reviewed old state.",
-                confidence=0.5,
-                provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="test")],
-            )
-        ]
-    ).write(workspace.facts_path)
+    workspace = seed_reviewed("pg-review", "pg", "old_orders", "Reviewed old state.")
     replacement = Snapshot(
         database="new",
         schema_name="public",
         dialect="postgresql",
         tables=[table("new_orders", "public")],
     )
-    original_write = WorkspaceManifest.write
+    original_write = yaml_store._write_manifest
 
-    def fail_new_manifest(self, path) -> None:
-        if self.snapshot_generation == 2:
+    def fail_new_manifest(path, manifest) -> None:
+        if manifest.snapshot_generation == 2:
             raise OSError("manifest commit failed")
-        original_write(self, path)
+        original_write(path, manifest)
 
-    monkeypatch.setattr(WorkspaceManifest, "write", fail_new_manifest)
+    monkeypatch.setattr(yaml_store, "_write_manifest", fail_new_manifest)
     with pytest.raises(OSError, match="manifest commit failed"):
-        workspace.publish_snapshot(replacement, reset_semantics=True)
+        workspace.publish(replacement, reset_semantics=True)
 
-    assert workspace.read_manifest().snapshot_generation == 1
-    assert workspace.read_current_snapshot().tables[0].name == "old_orders"
-    assert workspace.read_facts().facts[0].claim == "Reviewed old state."
+    assert workspace.manifest().snapshot_generation == 1
+    assert workspace.snapshot().tables[0].name == "old_orders"
+    assert workspace.facts().facts[0].claim == "Reviewed old state."
 
-    monkeypatch.setattr(WorkspaceManifest, "write", original_write)
-    workspace.publish_snapshot(replacement, reset_semantics=True)
-    assert workspace.read_manifest().snapshot_generation == 2
-    assert workspace.read_current_snapshot().tables[0].name == "new_orders"
-    assert not workspace.facts_path.exists()
+    monkeypatch.setattr(yaml_store, "_write_manifest", original_write)
+    workspace.publish(replacement, reset_semantics=True)
+    assert workspace.manifest().snapshot_generation == 2
+    assert workspace.snapshot().tables[0].name == "new_orders"
+    assert not workspace.has_semantics()
 
 
-def test_legacy_migration_keeps_root_state_until_pointer_commit(monkeypatch) -> None:
-    workspace = Workspace("legacy")
-    Snapshot(
-        database="old",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        tables=[table("orders", "public")],
-    ).write(workspace.root / "snapshot.yaml")
-    original_write = WorkspaceManifest.write
+def test_adoption_keeps_the_original_state_until_the_pointer_commits(
+    monkeypatch, isolated
+) -> None:
+    workspace = seed_legacy(
+        "legacy",
+        Snapshot(
+            database="old",
+            schema_name="public",
+            dialect="postgresql",
+            source_id="pg",
+            tables=[table("orders", "public")],
+        ),
+    )
+    at_root = isolated / "legacy" / yaml_store.SNAPSHOT
+    original_write = yaml_store._write_manifest
 
-    def fail_manifest(self, path) -> None:
+    def fail_manifest(path, manifest) -> None:
         raise OSError("manifest commit failed")
 
-    monkeypatch.setattr(WorkspaceManifest, "write", fail_manifest)
+    monkeypatch.setattr(yaml_store, "_write_manifest", fail_manifest)
     with pytest.raises(OSError, match="manifest commit failed"):
-        workspace.migrate_legacy("pg")
+        workspace.adopt("pg")
 
-    assert not workspace.has_manifest()
-    assert (workspace.root / "snapshot.yaml").exists()
+    assert not workspace.is_registered()
+    assert at_root.exists()
 
-    monkeypatch.setattr(WorkspaceManifest, "write", original_write)
-    workspace.migrate_legacy("pg")
-    assert workspace.read_current_snapshot().source_id == "pg"
-    assert not (workspace.root / "snapshot.yaml").exists()
+    monkeypatch.setattr(yaml_store, "_write_manifest", original_write)
+    workspace.adopt("pg")
+    assert workspace.snapshot().source_id == "pg"
+    assert not at_root.exists()
 
 
 def test_source_delete_is_blocked_while_workspace_references_it(client) -> None:
     declare_sources()
-    workspace = Workspace("pg-review")
-    workspace.write_manifest(WorkspaceManifest(id="pg-review", source_id="pg"))
+    Catalog("pg-review").register("pg")
 
     response = client.delete("/sources/pg")
     assert response.status_code == 409
@@ -406,15 +392,15 @@ def test_source_delete_and_workspace_create_are_serialized(client, monkeypatch) 
     declare_sources()
     entered = threading.Event()
     release = threading.Event()
-    original = Workspace.referencing_source
+    original = api.referencing_source
 
-    def gated_references(cls, source_id: str, root=None):
+    def gated_references(source_id: str, repository=None):
         if source_id == "pg":
             entered.set()
             release.wait(timeout=5)
-        return original(source_id, root)
+        return original(source_id, repository)
 
-    monkeypatch.setattr(Workspace, "referencing_source", classmethod(gated_references))
+    monkeypatch.setattr(api, "referencing_source", gated_references)
     responses: dict[str, object] = {}
 
     def delete() -> None:
@@ -436,23 +422,21 @@ def test_source_delete_and_workspace_create_are_serialized(client, monkeypatch) 
 
     assert responses["delete"].status_code == 204
     assert responses["create"].status_code == 404
-    assert not Workspace("racing").has_manifest()
+    assert not Catalog("racing").is_registered()
 
 
 def test_cached_workspace_remains_readable_without_source_credentials(client) -> None:
     declare_sources()
-    workspace = Workspace("pg-review")
-    workspace.write_manifest(
-        WorkspaceManifest(id="pg-review", source_id="pg", snapshot_generation=1)
+    workspace = Catalog("pg-review")
+    workspace.register("pg")
+    workspace.publish(
+        Snapshot(
+            database="pgdb",
+            schema_name="public",
+            dialect="postgresql",
+            tables=[table("orders", "public")],
+        )
     )
-    Snapshot(
-        database="pgdb",
-        schema_name="public",
-        dialect="postgresql",
-        source_id="pg",
-        generation=1,
-        tables=[table("orders", "public")],
-    ).write(workspace.snapshot_path)
 
     listing = client.get("/workspaces").json()["workspaces"][0]
     assert listing["snapshot_available"] is True
@@ -499,22 +483,24 @@ def test_publishing_out_of_generation_zero_will_not_abandon_semantic_state(tmp_p
     workspace root while every accessor moves to `generations/1/`. Skipping the
     check there protected the smaller loss and waved through the total one.
     """
-    workspace = Workspace("gen-zero", tmp_path)
-    workspace.create_manifest("pg")
-    FactStore(
-        facts=[
-            Fact(
-                subject="orders",
-                aspect="grain",
-                claim="One row per order.",
-                confidence=0.5,
-                provenance=[
-                    Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")
-                ],
-            )
-        ]
-    ).write(workspace.facts_path)
-    assert workspace.has_semantic_state()
+    workspace = Catalog("gen-zero", YamlMetadataRepository(tmp_path))
+    workspace.register("pg")
+    workspace.write_facts(
+        FactStore(
+            facts=[
+                Fact(
+                    subject="orders",
+                    aspect="grain",
+                    claim="One row per order.",
+                    confidence=0.5,
+                    provenance=[
+                        Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="from the name")
+                    ],
+                )
+            ]
+        )
+    )
+    assert workspace.has_semantics()
 
     snapshot = Snapshot(
         database="shop",
@@ -530,11 +516,11 @@ def test_publishing_out_of_generation_zero_will_not_abandon_semantic_state(tmp_p
     )
 
     with pytest.raises(WorkspaceConflict, match="reset_semantics"):
-        workspace.publish_snapshot(snapshot)
+        workspace.publish(snapshot)
 
     # Refused, so nothing moved and the claims are still reachable.
-    assert workspace.read_manifest().snapshot_generation == 0
-    assert workspace.facts_path.exists()
+    assert workspace.manifest().snapshot_generation == 0
+    assert workspace.facts().facts[0].claim == "One row per order."
 
-    published = workspace.publish_snapshot(snapshot, reset_semantics=True)
+    published = workspace.publish(snapshot, reset_semantics=True)
     assert published.snapshot_generation == 1

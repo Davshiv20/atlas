@@ -271,41 +271,44 @@ def test_the_map_replaces_model_authored_joins_rather_than_joining_them() -> Non
     """A relationship has one owner. Leaving the agent's earlier claim beside
     the derived one gives two answers to a settled question — 62 join claims
     where the schema has 37."""
+    from atlas.catalog import Catalog
     from atlas.facts import Fact, FactStore, Provenance, ProvenanceKind
-    from atlas.workspace import Workspace
+    from atlas.metadata.yaml_store import YamlMetadataRepository
 
     snapshot = schema(
         table("users", []),
         table("sessions", ["user_id"], fks=[fk(["user_id"], "users")]),
     )
-    workspace = Workspace("demo", root=_tmp())
-    workspace.create_manifest("test-source")
-    workspace.publish_snapshot(snapshot)
-    FactStore(
-        facts=[
-            Fact(
-                subject="sessions",
-                aspect="join",
-                discriminator="users",
-                claim="sessions.user_id references users.id.",
-                confidence=0.6,
-                provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="guessed")],
-            ),
-            Fact(
-                subject="sessions",
-                aspect="grain",
-                claim="One row per session.",
-                confidence=0.6,
-                provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="guessed")],
-            ),
-        ]
-    ).write(workspace.facts_path)
+    workspace = Catalog("demo", YamlMetadataRepository(_tmp()))
+    workspace.register("test-source")
+    workspace.publish(snapshot)
+    workspace.write_facts(
+        FactStore(
+            facts=[
+                Fact(
+                    subject="sessions",
+                    aspect="join",
+                    discriminator="users",
+                    claim="sessions.user_id references users.id.",
+                    confidence=0.6,
+                    provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="guessed")],
+                ),
+                Fact(
+                    subject="sessions",
+                    aspect="grain",
+                    claim="One row per session.",
+                    confidence=0.6,
+                    provenance=[Provenance(kind=ProvenanceKind.LLM_INFERENCE, detail="guessed")],
+                ),
+            ]
+        )
+    )
 
     found = discover(Answering(), snapshot, database="db")
     facts, links = as_claims(found)
     workspace.absorb_relationships(facts, links, found.evidence)
 
-    stored = workspace.read_facts().facts
+    stored = workspace.facts().facts
     joins = [f for f in stored if f.aspect == "join"]
     assert [f.id for f in joins] == ["sessions#join#users.user_id"]
     # Everything that is not a join is untouched.

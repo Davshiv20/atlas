@@ -16,6 +16,7 @@ from atlas.evidence import (
     Scope,
     Verdict,
 )
+from atlas.metadata.yaml_store import YamlMetadataRepository
 from atlas.policy import Trust, TrustBand, assess, evaluate
 
 NOW = datetime(2026, 8, 6, tzinfo=UTC)
@@ -227,13 +228,13 @@ def test_contradictions_are_queryable(tmp_path) -> None:
     assert len(store.contradictions("messages#join#conversations")) == 1
 
 
-def test_round_trip_through_disk(tmp_path) -> None:
+def test_round_trip_through_the_store(tmp_path) -> None:
     store = EvidenceStore()
     store.add(record())
     store.link(link(record()))
-    path = tmp_path / "evidence.yaml"
-    store.write(path)
-    assert EvidenceStore.read(path) == store
+    repository = YamlMetadataRepository(tmp_path)
+    repository.write_evidence("demo", store)
+    assert repository.read_evidence("demo") == store
 
 
 @pytest.mark.parametrize("aspect", ["grain", "join", "quality"])
