@@ -1,4 +1,5 @@
 import type { EngineConfig, Job, SchemaOutput } from "@/api/types";
+import { ExportPanel } from "@/components/ExportPanel";
 import { GeneratePanel } from "@/components/GeneratePanel";
 import { Badge } from "@/components/StatusBadge";
 import { dismissFinishedJob } from "@/store/uiSlice";
@@ -62,6 +63,10 @@ export function AppHeader({
         {output && workspaceScoped && blocked && (
           <Badge tone="failed">No API key configured</Badge>
         )}
+        {/* Before Generate, and quieter than it. Generating is the expensive
+            action and keeps the filled button; taking the result away is the
+            ordinary one. */}
+        {output && workspaceScoped && <ExportPanel disabled={busy} />}
         {output && workspaceScoped && (
           <GeneratePanel output={output} busy={busy} disabled={blocked} />
         )}

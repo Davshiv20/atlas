@@ -79,6 +79,14 @@ class TableView(BaseModel):
     excluded: list[Excluded] = Field(default_factory=list)
     #: Claims a human has not settled that would otherwise be emitted as fact.
     pending: int = 0
+    #: What nobody has been able to settle about this table yet.
+    #:
+    #: Carried into the view rather than left in the catalogue because it is
+    #: the honest form of invariant 7 — unknown meaning stays explicit. An
+    #: agent that knows the treatment of a column is unresolved can hedge; one
+    #: handed a view that simply omits the uncertainty cannot. This is the
+    #: `warnings` array of the agent payload in PRODUCT.md §15.
+    open_questions: list[str] = Field(default_factory=list)
 
     @property
     def emittable(self) -> bool:
@@ -155,6 +163,7 @@ def _table(table: TableOutput) -> TableView:
         ],
         excluded=excluded,
         pending=_pending(table),
+        open_questions=list(table.open_questions),
     )
 
 
@@ -296,7 +305,31 @@ def _render_table(table: TableView) -> list[str]:
             lines.extend(_field("        ", "reason", entry.reason))
             lines.extend(_render_samples("        ", entry.sample_values, entry.samples_withheld))
 
+    # Last, and as a key rather than a comment. Everything above is what Atlas
+    # is prepared to say; this is what it could not settle, and a reader that
+    # parses the file has to be able to reach it — the review-state comments
+    # are for a person, and an agent handed this does not read them.
+    if table.open_questions:
+        lines.append("    open_questions:")
+        for question in table.open_questions:
+            lines.extend(_item("      ", question))
+
     return lines
+
+
+def _item(indent: str, value: str) -> list[str]:
+    """One sequence entry, serialised rather than written by hand.
+
+    The same rule `_field` exists for, and a question is the most likely value
+    in this document to break it: they are written as prose, they end in a
+    question mark, and they routinely contain a colon.
+    """
+    dumped = (
+        yaml.safe_dump([value], width=66, allow_unicode=True, default_flow_style=False)
+        .rstrip("\n")
+        .split("\n")
+    )
+    return [indent + line for line in dumped]
 
 
 def _render_samples(

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Self
 
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from sqlalchemy import URL
 from starlette.datastructures import Headers
@@ -23,6 +23,7 @@ from starlette.responses import Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
+from atlas import export
 from atlas.adapters.base import UnsupportedDatabase
 from atlas.adapters.registry import create_adapter
 from atlas.answers import record_answer
@@ -994,6 +995,70 @@ def get_semantic_view(name: str, table: str | None = None) -> dict:
     }
 
 
+@app.get("/workspaces/{name}/export", tags=["catalogue"])
+def export_view(
+    name: str,
+    request: Request,
+    format: Literal["yaml", "json"] = "yaml",
+    include: Literal["ready", "all"] = "ready",
+    table: str | None = None,
+    download: bool = False,
+) -> Response:
+    """The semantic view, packaged to leave.
+
+    One URL serving two uses. Without `download` it is a resource an agent or a
+    CI job can keep fetching, tagged so an unchanged view costs a 304; with it,
+    the browser saves a file. They are the same bytes, and making them two
+    endpoints would let the file and the served view drift.
+
+    Gated on review by default. `/semantic-view` carries every captured table
+    with its state in comments, which is right for a console showing progress —
+    but a file that leaves the building is read by something that does not read
+    comments, so what has not passed review is held back unless `include=all`
+    says otherwise, and the header then says so in the file itself.
+    """
+    workspace = _existing(name)
+    output = _build(workspace)
+    try:
+        view, excluded = export.select(
+            output, ready_only=include == "ready", table=table
+        )
+    except export.UnknownTable as exc:
+        raise HTTPException(
+            status_code=404, detail=f"{table!r} is not in this workspace"
+        ) from exc
+
+    generation = workspace.manifest().snapshot_generation
+    tag = export.etag(view, excluded, generation=generation, fmt=format)
+    # Checked before rendering: the point of the tag is to avoid the work, and
+    # rendering first to then throw it away would only avoid the transfer.
+    if request.headers.get("if-none-match") == tag:
+        return Response(status_code=304, headers={"ETag": tag})
+
+    body = export.render(
+        view,
+        excluded,
+        workspace=name,
+        generation=generation,
+        total=len(output.tables),
+        fmt=format,
+    )
+    headers = {"ETag": tag}
+    if download:
+        # The generation is in the filename because a file on someone's disk
+        # has to be able to say which capture it came from; nothing else about
+        # it will.
+        suffix = f"-{table}" if table else ""
+        headers["Content-Disposition"] = (
+            f'attachment; filename="{name}{suffix}-gen{generation}-semantic-view.{format}"'
+        )
+    return Response(
+        content=body,
+        media_type="application/yaml" if format == "yaml" else "application/json",
+        headers=headers,
+    )
+
+
 @app.get("/workspaces/{name}/questions", tags=["review"])
 def get_questions(name: str) -> dict[str, list[Question]]:
     return {"questions": _existing(name).questions().questions}
@@ -1137,6 +1202,42 @@ def list_jobs(workspace: str | None = None) -> dict:
 
 # --- the console -----------------------------------------------------------
 
+#: The prefix the console addresses the engine under.
+#:
+#: `console/src/store/api.ts` uses `/api`, and in development `vite.config.ts`
+#: proxies it away before the request arrives. In the built image there is no
+#: proxy — this process serves both — so without the middleware below every
+#: console fetch asked for `/api/workspaces/...`, found no route, fell through
+#: to the static mount and came back 404. The console worked in development and
+#: could not reach its own engine in the artifact we ship.
+#:
+#: Stripping it here rather than re-declaring every route under a prefix keeps
+#: one URL correct in development, in the image, and for anything outside
+#: holding a link to an export.
+API_PREFIX = "/api"
+
+
+class ApiPrefixMiddleware:
+    """Route `/api/x` as `/x`.
+
+    Deliberately ASGI rather than a FastAPI dependency: the path has to change
+    before routing happens, and by the time a dependency runs the route has
+    already been chosen — or, in this case, already failed to be.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http":
+            path = scope.get("path", "")
+            if path == API_PREFIX or path.startswith(f"{API_PREFIX}/"):
+                # `raw_path` is what Starlette prefers when present, so leaving
+                # it stale would route the original path regardless of `path`.
+                scope = {**scope, "path": path[len(API_PREFIX) :] or "/"}
+                scope.pop("raw_path", None)
+        await self.app(scope, receive, send)
+
 
 class SinglePageApp(StaticFiles):
     """The built console, with the fallback a client-side router needs.
@@ -1188,3 +1289,7 @@ def mount_console(application: FastAPI, directory: Path | None = None) -> None:
 
 
 mount_console(app)
+
+# Outermost, so the prefix is gone before routing and before the static mount
+# at "/" gets a chance to answer an API path with index.html.
+app.add_middleware(ApiPrefixMiddleware)

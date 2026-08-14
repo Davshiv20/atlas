@@ -146,6 +146,23 @@ outside `atlas/metadata/` names a path:
 <workspace>/generations/<n>/questions.yaml
 ```
 
+### Getting the view out
+
+```bash
+curl localhost:8000/workspaces/elara/export              # what passed review
+curl "localhost:8000/workspaces/elara/export?include=all"  # plus the unvalidated
+```
+
+One URL, two uses. Without `download=1` it is a resource an agent or a CI job can keep
+fetching — tagged, so an unchanged view costs a `304` rather than a transfer; with it, the
+browser saves a file whose name carries the snapshot generation it came from. The console's
+**Export** panel is the same URL with a button on it.
+
+Review-gated by default. `/semantic-view` carries every captured table with its state in
+comments, which is right for a console showing progress — but a file that leaves the
+building is read by something that does not read comments, so unvalidated tables are held
+back unless asked for, and the header then names them.
+
 The catalogue document is not among them. It is derived from the snapshot and
 the claims, rebuilt on every read, and leaves Atlas only when someone exports
 it: `GET /workspaces/<name>/output` for the JSON, `atlas compile <name> --out

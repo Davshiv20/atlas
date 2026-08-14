@@ -656,6 +656,101 @@
         }
       }
     },
+    "/workspaces/{name}/export": {
+      "get": {
+        "tags": [
+          "catalogue"
+        ],
+        "summary": "Export View",
+        "description": "The semantic view, packaged to leave.\n\nOne URL serving two uses. Without `download` it is a resource an agent or a\nCI job can keep fetching, tagged so an unchanged view costs a 304; with it,\nthe browser saves a file. They are the same bytes, and making them two\nendpoints would let the file and the served view drift.\n\nGated on review by default. `/semantic-view` carries every captured table\nwith its state in comments, which is right for a console showing progress \u2014\nbut a file that leaves the building is read by something that does not read\ncomments, so what has not passed review is held back unless `include=all`\nsays otherwise, and the header then says so in the file itself.",
+        "operationId": "export_view_workspaces__name__export_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "yaml",
+                "json"
+              ],
+              "type": "string",
+              "default": "yaml",
+              "title": "Format"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ready",
+                "all"
+              ],
+              "type": "string",
+              "default": "ready",
+              "title": "Include"
+            }
+          },
+          {
+            "name": "table",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Table"
+            }
+          },
+          {
+            "name": "download",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Download"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workspaces/{name}/questions": {
       "get": {
         "tags": [

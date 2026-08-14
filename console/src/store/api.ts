@@ -18,10 +18,14 @@ import type {
 /**
  * The engine is proxied at /api in development (see vite.config.ts), so the
  * browser stays same-origin and there is no CORS configuration to get wrong.
+ * In the built image there is no proxy, and the engine strips the prefix
+ * itself (`ApiPrefixMiddleware`) — so this one base is correct in both.
  */
+export const API_BASE = "/api";
+
 export const api = createApi({
   reducerPath: "engine",
-  baseQuery: fetchBaseQuery({ baseUrl: "/api" }),
+  baseQuery: fetchBaseQuery({ baseUrl: API_BASE }),
   tagTypes: ["Workspaces", "Output", "Claims", "Questions", "Job", "Sources"],
   endpoints: (build) => ({
     config: build.query<EngineConfig, void>({
@@ -230,3 +234,24 @@ export const {
   useJobQuery,
   useJobsQuery,
 } = api;
+
+/**
+ * Where the semantic view can be fetched or downloaded.
+ *
+ * Built here rather than in the component so the base path is named once. The
+ * export is reached by URL rather than through RTK Query because the point of
+ * it is to be a link: a browser download and an agent's `curl` want the same
+ * address, and routing it through a cache would give the file a copy of the
+ * view rather than the view.
+ */
+export function exportUrl(
+  workspace: string,
+  options: { format?: "yaml" | "json"; include?: "ready" | "all"; table?: string } = {},
+): string {
+  const query = new URLSearchParams({
+    format: options.format ?? "yaml",
+    include: options.include ?? "ready",
+  });
+  if (options.table) query.set("table", options.table);
+  return `${API_BASE}/workspaces/${encodeURIComponent(workspace)}/export?${query}`;
+}

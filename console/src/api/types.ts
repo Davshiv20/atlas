@@ -390,6 +390,9 @@ export interface TableView {
   excluded: Excluded[];
   /** Consequential claims nobody has settled; non-zero blocks a clean emit. */
   pending: number;
+  /** What nobody has settled about this table. Carried into the emitted view
+   *  so an agent can hedge rather than read confidence it should not have. */
+  open_questions: string[];
 }
 
 export interface SemanticView {
