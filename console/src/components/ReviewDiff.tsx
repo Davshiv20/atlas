@@ -234,12 +234,11 @@ export function ReviewDiff({
             <span className="ml-auto flex shrink-0 items-center gap-2">
               {confirmingRegenerate ? (
                 <>
-                  {/* Regeneration discards this table's claims rather than
-                      merging, so the count is stated before it happens — the
-                      bulk control says the same thing behind a checkbox. */}
+                  {/* Existing semantics stay readable until the replacement
+                      finishes. A partial or failed run preserves them. */}
                   <span className="text-meta text-amber-strong">
-                    Discards {claimCount} claim{claimCount === 1 ? "" : "s"} and their
-                    evidence.
+                    Replaces {claimCount} claim{claimCount === 1 ? "" : "s"} only after a
+                    complete run.
                   </span>
                   <Button
                     size="sm"

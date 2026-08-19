@@ -843,9 +843,10 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         if not selected:
             return {"claims": 0, "questions": 0, "skipped": sorted(analyzed), "tables": []}
 
-        names = {t.name for t in selected}
         assert_current()
-        dropped = workspace.drop(names) if request.regenerate else {}
+        discarded: dict[str, int] = {}
+        preserved: list[str] = []
+        persisted = {"claims": 0, "questions": 0, "evidence": 0}
 
         planned = [t.name for t in selected]
 
@@ -859,8 +860,6 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         finally:
             mapper.close()
         joins, join_links = as_claims(discovery)
-        assert_current()
-        workspace.absorb_relationships(joins, join_links, discovery.evidence)
 
         def describe() -> str:
             if not reading:
@@ -885,7 +884,19 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
             # could be finished for twenty minutes with nothing on disk to show
             # for it, and a restart threw the whole run away.
             assert_current()
-            workspace.absorb(table, sink.facts, sink.questions, sink.evidence)
+            if request.regenerate and sink.truncated:
+                # Regeneration is destructive only after its replacement is
+                # complete. A dead source or early model exit must not erase a
+                # table's last usable semantics before producing a successor.
+                preserved.append(table)
+            else:
+                if request.regenerate:
+                    for label, count in workspace.drop({table}).items():
+                        discarded[label] = discarded.get(label, 0) + count
+                workspace.absorb(table, sink.facts, sink.questions, sink.evidence)
+                persisted["claims"] += len(sink.facts)
+                persisted["questions"] += len(sink.questions)
+                persisted["evidence"] += len(sink.evidence.records)
             reading.discard(table)
             done.append(table)
             if sink.truncated:
@@ -918,17 +929,29 @@ def analyze(name: str, request: AnalyzeRequest = Body(default=AnalyzeRequest()))
         finally:
             adapter.close()
 
+        # Publish the rebuilt relationship map after table replacement. A
+        # complete regeneration drops that table's old facts; publishing joins
+        # before the drop deleted the fresh relationship claims and links again.
+        assert_current()
+        workspace.absorb_relationships(joins, join_links, discovery.evidence)
+
         # Nothing is compiled here. Each table was persisted as it finished and
         # the catalogue is built from the record on every read, so there is no
         # projection left to write at the end of a run. The last check is that
         # the workspace this run wrote to is still the one it started on.
         assert_current()
         return {
-            "claims": len(store.facts),
-            "questions": len(questions.questions),
-            "evidence": len(evidence.records) + len(discovery.evidence.records),
+            "claims": persisted["claims"],
+            "questions": persisted["questions"],
+            "evidence": persisted["evidence"] + len(discovery.evidence.records),
+            "generated": {
+                "claims": len(store.facts),
+                "questions": len(questions.questions),
+                "evidence": len(evidence.records),
+            },
             "relationships": len(discovery.verified),
-            "discarded": dropped,
+            "discarded": discarded,
+            "preserved": preserved,
             "tables": planned,
             # Tables the model was cut off on. Their claims are a partial
             # reading, so a run that returns few claims is explained rather

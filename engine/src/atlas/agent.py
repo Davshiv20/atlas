@@ -82,16 +82,19 @@ them — that work is done, and repeating it spends the turns you need for \
 meaning. Propose a join only for a relationship that is not listed and that \
 you have a specific reason to suspect.
 
-Ground every claim before recording it. You have read-only SQL — use it to test \
-what you believe rather than to confirm it. Evidence must be a query that could \
-have contradicted the claim: an aggregate, a GROUP BY, a DISTINCT, a HAVING. \
-Selecting a few rows shows you what exists and never what is always true, so it \
-grounds nothing and will be rejected. Checks that tend to pay off: orphan \
-rates on candidate joins, count-distinct against row count for grain, whether an \
-enum's value set is closed, whether a soft-delete column is actually exercised, \
-ordering between date columns, magnitude checks that reveal units. Follow up on \
-whatever a result makes suspicious — a 4% orphan rate is a finding only once you \
-know whether the orphans share a date range, a creator, or nothing at all.
+Ground every structural claim before recording it. When the live source is \
+available, use read-only checks to test what you believe rather than merely \
+confirm it. Evidence must be a query that could have contradicted the claim: an \
+aggregate, a GROUP BY, a DISTINCT, a HAVING. Selecting a few rows shows what \
+exists and never what is always true, so it grounds nothing. If a live check \
+cannot run, do not keep retrying it: the cached snapshot still supports a narrow \
+`semantics` hypothesis. Record that hypothesis with an empty `evidence_ids` list \
+so Atlas marks it unsupported and unverified, and ask a focused human question \
+for business meaning the snapshot cannot establish. Never present cached \
+inference as measured or verified. Checks that tend to pay off when available: \
+orphan rates on candidate joins, count-distinct against row count for grain, \
+whether an enum's value set is closed, whether a soft-delete column is actually \
+exercised, ordering between date columns, and magnitude checks that reveal units.
 
 A well-constructed question is as valuable as a fact, and often more honest. \
 Business meaning is frequently not derivable from data at any effort: if a \
@@ -110,9 +113,9 @@ Record findings through the tools. Prose in your final message is not collected.
 class AnalysisSink(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
     questions: list[Question] = Field(default_factory=list)
-    # Evidence is minted here, never by the agent. A claim can only cite an id
-    # that a check actually produced, which is what makes an unbacked claim
-    # unrepresentable rather than merely discouraged.
+    # Evidence is minted here, never by the agent. Structural claims must cite
+    # ids produced by checks; cached-snapshot semantics may remain explicitly
+    # unsupported, but can never invent or upgrade an evidence record.
     evidence: EvidenceStore = Field(default_factory=EvidenceStore)
     # True when the model was cut off by the step ceiling rather than finishing.
     # Its claims are then a partial reading of the table, not a complete one.
@@ -125,6 +128,10 @@ class AnalysisSink(BaseModel):
     # which is the difference between "the model found nothing" and "the model
     # tried and the gate turned it away".
     rejections: list[str] = Field(default_factory=list)
+    # Live checks can fail while the cached snapshot remains readable. Keeping
+    # execution failures separate lets the caller preserve a prior regeneration
+    # instead of replacing it with a snapshot-only partial result.
+    check_failures: list[str] = Field(default_factory=list)
     # Columns this reading left without a meaning. A `metric` claim is not a
     # description, so a column can be worked on and still come back
     # undescribed — which is invisible unless it is counted here.
@@ -279,6 +286,7 @@ def build_tools(
     def _record(check) -> str:
         record, message = run_check(adapter, check, database=database)
         if record is None:
+            sink.check_failures.append(message)
             return message
         sink.evidence.add(record)
         return f"{record.id} — {message}"
@@ -381,7 +389,11 @@ def build_tools(
             assessment.reasons,
         )
 
-        if trust is Trust.UNSUPPORTED and weight is not Consequence.ROUTINE:
+        if (
+            trust is Trust.UNSUPPORTED
+            and weight is not Consequence.ROUTINE
+            and aspect != "semantics"
+        ):
             return _refuse(
                 subject,
                 aspect,
@@ -567,13 +579,14 @@ class CompleteColumns(dspy.Signature):
 
 
 CompleteColumns = CompleteColumns.with_instructions(
-    "Finish the incomplete table reading. For every column named in `missing`, run a "
-    "relevant check and record exactly one `semantics` claim with `record_claim`. "
-    "A metric, quality, lifecycle, or unit claim does not replace semantics. Do not "
-    "redo columns that are not listed. If business intent cannot be proved, record the "
-    "narrowest evidence-grounded physical role the data supports and ask a focused "
-    "human question for the unresolved business interpretation. Prose is discarded; "
-    "only accepted tool calls count."
+    "Finish the incomplete table reading. For every column named in `missing`, try a "
+    "relevant live check and record exactly one `semantics` claim with `record_claim`. "
+    "If a check cannot run, do not retry it: use the cached physical profile to record "
+    "the narrowest honest semantics claim with an empty `evidence_ids` list, which "
+    "keeps it unsupported and unverified, then ask a focused human question for any "
+    "business interpretation the snapshot cannot establish. A metric, quality, "
+    "lifecycle, or unit claim does not replace semantics. Do not redo columns that are "
+    "not listed. Prose is discarded; only accepted tool calls count."
 )
 
 
@@ -689,7 +702,11 @@ def analyze_table(
             snapshot, table, sink, tools, repair_columns, relationships
         )
         sink.undescribed = _missing_named_columns(table, sink, repair_columns)
-        sink.truncated = "finish" not in calls or bool(sink.undescribed)
+        sink.truncated = (
+            "finish" not in calls
+            or bool(sink.undescribed)
+            or bool(sink.check_failures)
+        )
         if sink.undescribed:
             logger.warning(
                 "[%s] %d column(s) still have no semantics claim after repair: %s",
@@ -743,6 +760,12 @@ def analyze_table(
         # This table remains incomplete and must be selected again by a future
         # analysis run. Never silently convert model early-exit into catalogue
         # completeness.
+        sink.truncated = True
+
+    if sink.check_failures:
+        # Snapshot-only inference is useful, but a failed live check means the
+        # requested validation is incomplete even if another check succeeded.
+        # Keep the table selectable once connectivity returns.
         sink.truncated = True
         logger.warning(
             "[%s] %d column(s) still have no semantics claim after repair: %s",

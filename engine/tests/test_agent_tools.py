@@ -149,6 +149,24 @@ def test_a_consequential_claim_cannot_be_recorded_without_evidence(wired) -> Non
     assert sink.facts == []
 
 
+def test_cached_semantics_can_be_recorded_without_live_evidence(wired) -> None:
+    """A cached snapshot can support an honest hypothesis even when the source
+    is offline. It remains unsupported and unverified; structural claims retain
+    the stricter evidence requirement above."""
+    tools, sink, _ = wired
+    result = tools["record_claim"](
+        subject="deliverables.stage",
+        aspect="semantics",
+        claim="Workflow stage code for the deliverable.",
+        evidence_ids=[],
+    )
+
+    assert result.startswith("Recorded")
+    assert sink.facts[0].trust.state is Trust.UNSUPPORTED
+    assert sink.facts[0].status is FactStatus.UNVERIFIED
+    assert sink.evidence.records == []
+
+
 def test_a_grounded_claim_is_recorded_with_a_computed_confidence(wired) -> None:
     tools, sink, _ = wired
     evidence = evidence_id_from(

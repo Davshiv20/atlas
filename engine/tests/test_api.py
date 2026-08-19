@@ -636,8 +636,40 @@ def test_a_finished_table_is_readable_before_the_run_ends(client, monkeypatch) -
     settled = _finish(get_registry(), Job.model_validate(response.json()))
     assert settled.status is JobStatus.SUCCEEDED, settled.error
 
-    assert observed[0] == ["alpha"]  # visible while beta was still running
-    assert observed[1] == ["alpha", "beta"]
+    # Each completed table is visible immediately. Unrelated prior tables stay
+    # present until their own complete replacements are ready.
+    assert observed[0] == ["alpha", "orders", "orders.status"]
+    assert observed[1] == ["alpha", "beta", "orders", "orders.status"]
+
+
+def test_a_partial_regeneration_preserves_the_previous_table(client, monkeypatch) -> None:
+    """A failed source check or early model exit must not make Regenerate erase
+    the last usable semantics before it has a complete replacement."""
+    from atlas import api
+    from atlas.agent import AnalysisSink
+
+    workspace = seed("demo")
+    before = workspace.facts().model_dump(mode="json")
+
+    def fake_analyze(adapter, snapshot, **kwargs):
+        sink = AnalysisSink(facts=[_fact("orders")], truncated=True)
+        kwargs["on_table_start"]("orders")
+        kwargs["on_table_done"]("orders", sink)
+        return FactStore(facts=sink.facts), QuestionLog(), EvidenceStore()
+
+    register_source()
+    monkeypatch.setattr(api, "create_adapter", lambda url, **_: _NullAdapter())
+    monkeypatch.setattr("atlas.agent.analyze_schema", fake_analyze)
+    monkeypatch.setenv("ELARA_DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/x")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    get_settings.cache_clear()
+
+    response = client.post("/workspaces/demo/analyze", json={"regenerate": True})
+    settled = _finish(get_registry(), Job.model_validate(response.json()))
+
+    assert settled.status is JobStatus.SUCCEEDED, settled.error
+    assert settled.result["preserved"] == ["orders"]
+    assert workspace.facts().model_dump(mode="json") == before
 
 
 def _fact(subject: str) -> Fact:
@@ -651,6 +683,7 @@ def _fact(subject: str) -> Fact:
 
 
 class _NullAdapter:
+    def test_connection(self) -> None: ...
     def close(self) -> None: ...
 
 

@@ -171,8 +171,7 @@ FILE` for YAML on disk at a path you choose.
 This inspectable file-backed design supports one trusted Atlas installation with multiple
 independent data sources. It is not a multi-tenant or multi-instance storage model.
 
-A stored snapshot can exist while its source is disconnected. The console must treat
-connection health and snapshot availability as separate states.
+A stored snapshot can exist while its source is disconnected. Atlas can still generate narrow, explicitly unsupported semantic hypotheses from that cached structure and profile; live checks remain unavailable, so the table stays partial until connectivity returns. Regeneration preserves the previous table semantics unless a complete replacement finishes. The console treats connection health and snapshot availability as separate states.
 
 ## Architectural rules
 
