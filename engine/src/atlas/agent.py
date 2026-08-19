@@ -814,8 +814,10 @@ def analyze_schema(
     caller cannot say which table is under way, and the console shows a spinner
     with nothing behind it. `on_table_done` also reports whether that table hit
     the turn ceiling, which is the difference between a finished reading and a
-    partial one. Both are invoked under a lock: the concurrency belongs to this
-    function, so callers write to the workspace as if they were sequential.
+    partial one. Start callbacks are serialized under a lock; completion callbacks
+    run on this coordinating thread as futures finish. Keeping completion off the
+    worker threads matters when the caller already holds a thread-reentrant workspace
+    transaction: a worker trying to re-enter that file lock waits on its own process.
     """
     configure()
     ranked = select_tables(snapshot, limit, tables, already_analyzed)
@@ -826,7 +828,7 @@ def analyze_schema(
     reporting = threading.Lock()
     finished: dict[str, AnalysisSink] = {}
 
-    def read(table: Table) -> None:
+    def read(table: Table) -> tuple[str, AnalysisSink]:
         logger.info("analyzing %s (%s rows)", table.qualified_name, table.row_count)
         with reporting:
             if on_table_start:
@@ -839,22 +841,25 @@ def analyze_schema(
             sink = analyze_table(
                 adapter, snapshot, table, relationship_context, columns_to_repair
             )
-        # Persisting is serialised, not the reading. The workspace rewrites
-        # whole files and merges claim by claim; two workers landing at once
-        # would drop one of them.
-        with reporting:
-            finished[table.name] = sink
-            logger.info(
-                "  %s: %d facts, %d questions", table.name, len(sink.facts), len(sink.questions)
-            )
-            if on_table_done:
-                on_table_done(table.name, sink)
+        return table.name, sink
 
     with ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="atlas-table") as pool:
         for outcome in as_completed([pool.submit(read, table) for table in ranked]):
             # Re-raised here rather than swallowed: one table failing is a run
             # failing, and a silently short catalogue is worse than an error.
-            outcome.result()
+            table_name, sink = outcome.result()
+            finished[table_name] = sink
+            logger.info(
+                "  %s: %d facts, %d questions",
+                table_name,
+                len(sink.facts),
+                len(sink.questions),
+            )
+            # Persistence belongs to the coordinator thread. The API's analysis
+            # job already holds the workspace transaction on this thread, so a
+            # table worker cannot safely open the same advisory lock itself.
+            if on_table_done:
+                on_table_done(table_name, sink)
 
     # Folded in the order the tables were selected, so a run's output does not
     # depend on which worker happened to finish first.

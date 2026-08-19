@@ -455,9 +455,10 @@ def test_results_do_not_depend_on_which_worker_finishes_first(monkeypatch) -> No
     assert set(done) == {"a", "b", "c"}
 
 
-def test_persistence_is_never_concurrent(monkeypatch) -> None:
-    """The workspace rewrites whole files. Two workers landing together drop
-    one of them, which is why the callbacks hold a lock."""
+def test_persistence_is_serial_and_stays_on_the_coordinator_thread(monkeypatch) -> None:
+    """The workspace rewrites whole files, and the API coordinator already holds
+    its transaction. Completion callbacks must neither overlap nor move to a table
+    worker that would deadlock re-entering the advisory workspace lock."""
     import threading
 
     from atlas import agent
@@ -465,9 +466,12 @@ def test_persistence_is_never_concurrent(monkeypatch) -> None:
     overlapping = False
     inside = 0
     guard = threading.Lock()
+    coordinator = threading.get_ident()
+    callback_threads: set[int] = set()
 
     def absorbing(name, sink) -> None:
         nonlocal overlapping, inside
+        callback_threads.add(threading.get_ident())
         with guard:
             inside += 1
             if inside > 1:
@@ -485,6 +489,7 @@ def test_persistence_is_never_concurrent(monkeypatch) -> None:
     )
 
     assert not overlapping
+    assert callback_threads == {coordinator}
 
 
 # --- the model's identifiers are normalised, not policed --------------------
