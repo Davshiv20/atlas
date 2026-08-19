@@ -164,7 +164,7 @@ export function SourceForm({
             <input
               value={username}
               onChange={(event) => setUsername(event.target.value)}
-              placeholder="SHIVAM"
+              placeholder="ATLAS_USER"
               autoComplete="username"
               required
               className={INPUT}

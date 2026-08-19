@@ -1,38 +1,22 @@
 # Approval model
 
-Status: **proposal**. Nothing here is implemented. Read
-[`PRODUCT.md`](PRODUCT.md) for the product loop and [`CLAUDE.md`](CLAUDE.md) for
-the invariants this has to satisfy.
+Status: **partially implemented**. Human review is recorded as evidence by `engine/src/atlas/decisions.py`, and `engine/src/atlas/output.py` derives endorsement on read through `engine/src/atlas/endorsement.py`. Legacy reviews are projected on read. Refresh/regeneration does not yet preserve prior review evidence, so automatic stale-endorsement transitions across a new snapshot remain future work. This document records both the implemented model and that remaining integration. Read [`PRODUCT.md`](PRODUCT.md) for the product loop and [`CLAUDE.md`](CLAUDE.md) for the governing invariants.
 
 ## What endorsement is
 
 Endorsement answers one question: **where does this claim stand with a human?**
 
-Today that is answered by a word stored on the claim — `verified`,
-`unverified`, `rejected` — written once when a reviewer presses a key, and never
-looked at again. This proposal stops storing the word and works the answer out
-from what people actually did.
+The legacy implementation answered that with a word stored on the claim — `verified`, `unverified`, or `rejected` — written once and never reconsidered. The implemented model derives the answer from what people actually did.
 
 Concretely. On Monday, Atlas proposes *"email is the login identity for a
 user"* and a reviewer confirms it.
 
-- Today, that writes `status: verified, verified_by: shivam`. That is the entire
-  memory of the event.
-- Under this proposal it writes a record: *Shivam confirmed this on Monday,
-  having seen these sample values and this uniqueness check.*
+- The legacy model wrote `status: verified, verified_by: alex`. That was the entire memory of the event.
+- The implemented model writes a record: *Alex confirmed this on Monday, having seen these sample values and this uniqueness check.*
 
-On Thursday the uniqueness check re-runs and fails — three hundred duplicate
-addresses have appeared.
+The target behavior is that when the uniqueness check later re-runs and fails, the approval derives as **stale** because the evidence it rested on moved. The endorsement derivation supports that comparison, but the current refresh/regeneration path resets semantic state instead of carrying prior review evidence into the new generation. End-to-end stale transitions therefore still require refresh integration.
 
-- Today the claim still reads `verified`. Nothing revisits it, and an agent
-  consuming the view is told a person approved something that is now false.
-- Under this proposal the record still says the approval rested on a check that
-  has since failed, so the claim derives as **stale** on the next read, with no
-  one having to notice.
-
-Same keystroke from the reviewer. The difference is that the system remembers
-*why* the claim was approved rather than only *that* it was, which is what lets
-it notice when the reason stops holding.
+The implemented improvement is that the system remembers *why* a claim was approved rather than only *that* it was. Preserving that record across generations is the remaining step needed to notice automatically when the reason stops holding.
 
 Everything below is the mechanics of that.
 
@@ -45,13 +29,9 @@ factors, separates *what established the claim* (`Trust`) from *how strongly*
 `ClaimPolicy.ceiling`, and treats contradiction as a first-class state rather
 than as an absence of support.
 
-Approval did not move. It is still `FactStatus` — a flat enum written onto the
-`Fact`, whose entire record of who decided and why is `verified_by: str | None`.
+Before endorsement was implemented, approval remained `FactStatus` — a flat enum written onto the `Fact`, whose entire record of who decided and why was `verified_by: str | None`.
 
-The two are now inconsistent by construction. `assess_facts`
-(`engine/src/atlas/output.py`) recomputes every claim's trust on read and never
-touches `status`, so a claim confirmed months ago, against which a check has
-since run and failed, is emitted as:
+That made trust and approval inconsistent by construction. `assess_facts` (`engine/src/atlas/output.py`) recomputed every claim's trust on read without revisiting the stored status, so a claim confirmed months earlier could be emitted as:
 
 ```yaml
 status:      verified        # frozen, from a human, months ago
@@ -87,12 +67,9 @@ is derived from the observations that exist.
 | **APPROVE** | `HUMAN_DECISION` · `ASSERTED` · `PASSED` | `SUPPORTS` | a person approved the proposed meaning |
 | **REJECT** | `HUMAN_DECISION` · `ASSERTED` · `FAILED` | `CONTRADICTS` | a person asserted against the claim |
 
-The vocabulary already exists — `EvidenceType.HUMAN_DECISION`,
-`Authority.ASSERTED`, `LinkKind.CONTRADICTS` are all defined in
-`engine/src/atlas/evidence.py`. `record_answer` already writes the first row.
-The other two are the same function with a different assertion and verdict.
+The vocabulary already exists — `EvidenceType.HUMAN_DECISION`, `Authority.ASSERTED`, and `LinkKind.CONTRADICTS` are defined in `engine/src/atlas/evidence.py`. `record_answer` writes the first form through the question-answer path; `record_decision` writes approvals and rejections through the shared decision-record constructor.
 
-This is a generalization of existing code, not a rewrite.
+This generalizes the existing evidence model rather than replacing it.
 
 ## Endorsement states
 
@@ -137,17 +114,9 @@ between what was reviewed and what is true now.
 
 ## Decay
 
-An endorsement records the evidence it was made against — the record ids, and
-their content hashes. When those records are superseded by a re-run whose
-observations differ, the endorsement derives as `STALE`.
+An endorsement records the evidence it was made against — the record ids and their content hashes. The derivation returns `STALE` when those records are replaced by different observations in the evidence set.
 
-This is the same treatment `freshness` already gets inside `assess()`. A
-sampled observation expires because the rows it saw may have changed; a human
-endorsement of a claim about those rows expires for the same reason.
-
-Decay is **not** a clock. An endorsement of a claim whose evidence has not moved
-stands indefinitely. Time alone does not unseat a person's judgment about
-meaning — a changed world does.
+Current refresh and regeneration reset semantic state, so production does not yet carry old endorsements forward to exercise that transition automatically. The intended integration is evidence-based rather than clock-based: unchanged evidence leaves an endorsement standing, while changed evidence scopes re-review.
 
 ## Rejection
 
@@ -170,45 +139,32 @@ APPROVED, AUTHORED   → verified
 REJECTED             → rejected
 ```
 
-Existing workspaces need a one-time backfill: for every fact carrying a
-`verified_by`, synthesize a `HUMAN_DECISION` record attributed to that reviewer,
-with the scope marked unknown and `currency` unresolvable. That is honest — we
-genuinely do not know what those reviewers were looking at — and it preserves
-the review history rather than discarding it.
+Existing workspaces are not backfilled. When a fact has `verified_by` but no human-decision record, `assess_facts` projects a legacy endorsement on read with unknown scope. This preserves the visible reviewer and status without inventing evidence, but that legacy approval cannot derive staleness. A durable backfill remains optional future migration work.
 
 ## API surface
 
-`POST /workspaces/{ws}/claims/{id}/review` keeps its request shape. What changes
-is underneath:
+`POST /workspaces/{ws}/claims/{id}/review` kept its request shape. Underneath:
 
-- it writes an evidence record and a link instead of mutating a status field;
-- **it stops returning 409.** The refusal exists today because
+- it writes an evidence record and a link instead of treating a status field as the source of truth;
+- **it no longer returns the former grounding 409.** That refusal existed because
   `enforce_grounding_rules` forbids `verified` on an ungrounded claim. Under this
   model, endorsing *is* grounding — `is_verification` is already true for a
   `HUMAN_DECISION` with a `PASSED` verdict — so the condition the 409 protects
   against is no longer reachable;
-- the response carries the derived `EndorsementAssessment` alongside the
-  existing `TrustAssessment`.
+- subsequent output reads carry the derived `EndorsementAssessment` alongside the existing `TrustAssessment`; the review response itself remains the updated `Fact` for compatibility.
 
-`POST /questions/{id}/answer` keeps working and becomes one of three callers of
-the shared record-writing function.
+`POST /questions/{id}/answer` continues to record human-decision evidence through its sibling answer path.
 
 ## What this costs
 
-The 409 does real work today. Its docstring is explicit: it is *"the rule that
-stops a confident guess from being promoted to fact by a distracted reviewer."*
-Removing it means a reviewer can ground anything by pressing one key.
-
-That protection has to be replaced, not simply dropped:
+The removed 409 did real work: it stopped a confident guess from being promoted to fact by a distracted reviewer. Allowing human assertion therefore required replacement protections rather than simply dropping the refusal:
 
 1. **The states stay distinguishable.** A claim grounded by a passing check
    derives `Trust.VERIFIED`; a claim grounded only by a person derives
    `Trust.AUTHORITATIVE` via `Authority.ASSERTED`. The emitted view can and must
    say which — "a check tested this" and "a named person asserted this" are
    different promises to an agent.
-2. **The reviewer must be told before acting**, not after. The interface has to
-   show that nothing tested a claim at the moment the decision is offered. Today
-   that arrives as a failed request after the fact, which is worse.
+2. **The reviewer must be told before acting**, not after. The interface must show when no database check established the claim at the moment the decision is offered.
 3. **`ClaimPolicy.ceiling` still binds.** Human assertion lifts a business claim
    past `OBSERVED`; it must not reach `ENFORCED`, which is a property of the
    database and not of anyone's opinion.

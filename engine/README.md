@@ -22,14 +22,26 @@ API documentation is available at `http://localhost:8000/docs`.
 
 ## CLI workflow
 
+Declare a source through the console first, or add it to `sources.yaml`. The CLI intentionally does not accept connection overrides:
+
+```yaml
+sources:
+  - id: demo
+    adapter: postgresql
+    url_env: DEMO_DATABASE_URL
+    namespace: public
+```
+
+Set `DEMO_DATABASE_URL`, then create a workspace bound permanently to that source:
+
 ```bash
 uv run atlas preflight
-uv run atlas create-workspace elara-review elara
-uv run atlas extract elara-review
-uv run atlas summary elara-review
-uv run atlas analyze elara-review --limit 3
-uv run atlas claims elara-review
-uv run atlas compile elara-review --markdown out/elara-review/report.md
+uv run atlas create-workspace demo-review demo
+uv run atlas extract demo-review
+uv run atlas summary demo-review
+uv run atlas analyze demo-review --limit 3
+uv run atlas claims demo-review
+uv run atlas compile demo-review --markdown out/demo-review/report.md
 ```
 
 Extraction is deterministic and does not call a model. Analysis uses the configured
@@ -142,10 +154,8 @@ atomically points to one complete generation; prior generations remain recoverab
 | `generations/<n>/facts.yaml` | Semantic claims and review decisions. |
 | `generations/<n>/evidence.yaml` | Immutable observations and claim-evidence links. |
 | `generations/<n>/questions.yaml` | Business questions and reviewer answers. |
-| `generations/<n>/output.yaml` | Derived review/output document. Never edit directly. |
 
-The API rebuilds output from snapshot, claims, and questions when it is read. A cached
-`output.yaml` is an export, not the authoritative state.
+The API rebuilds output from the snapshot, claims, evidence, and questions on every read. `atlas compile` can export that derived output to a caller-chosen path; it is not stored as workspace state.
 
 This file-backed repository supports one trusted Atlas installation. PostgreSQL and
 Snowflake remain isolated in separate source-bound workspaces; it is not a multi-tenant
@@ -179,15 +189,15 @@ refetches workspace output as completed tables are persisted.
 | `ATLAS_MAX_ROWS` | `50` |
 | `ATLAS_STATEMENT_TIMEOUT_MS` | `15000` |
 | `ATLAS_OUTPUT_DIR` | `out` |
-| `ATLAS_SAMPLE_POLICY` | `strict` in code; `.env.example` sets `full` so the review sheet shows raw samples. |
+| `ATLAS_SAMPLE_POLICY` | `strict`; set `full` only when raw samples are explicitly required for a trusted review. |
 
 ## Security
 
 Use a source role with `SELECT` and nothing else. PostgreSQL checks also run in a
-read-only transaction with a statement timeout. The review workflow is easiest with
-`ATLAS_SAMPLE_POLICY=full`, because samples are shown in the table sheet. If strict
-profiling is enabled, Atlas withholds sensitive, opaque, free-text, key, and
-high-cardinality values and shows the withholding reason instead.
+read-only transaction with a statement timeout. Strict profiling is the default: Atlas
+withholds sensitive, opaque, free-text, key, and high-cardinality values and shows the
+withholding reason instead. Enable `ATLAS_SAMPLE_POLICY=full` only for a trusted review
+that deliberately requires raw samples, then re-extract the source.
 
 These process-level guards are defence in depth. Database permissions remain the
 primary security boundary.

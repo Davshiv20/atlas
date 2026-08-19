@@ -63,9 +63,10 @@ inferred without becoming review work.
 Each row shows source shape, suggested meaning, sample values, trust score, review reason,
 and an expandable lineage chain from source column to evidence to claim to YAML output.
 If a snapshot was extracted with samples withheld, the row says why and points to
-`ATLAS_SAMPLE_POLICY=full` for raw samples. Confidence is a trust score—not model
-certainty or a probability. Consequence remains separate and drives the highlighting. The
-engine rejects attempts to verify claims that lack sufficient grounding.
+`ATLAS_SAMPLE_POLICY=full` as an explicit opt-in for trusted raw-sample review. Confidence
+is a trust score—not model certainty or a probability. Consequence remains separate and
+drives the highlighting. A review is recorded as human-decision evidence; Atlas keeps a
+human assertion distinct from a claim established by a database check.
 
 ### Questions
 
@@ -133,6 +134,6 @@ The current console remains table- and claim-oriented. The target workbench desc
 - Observed facts and inferred meaning must look different.
 - Unknown, stale, and conflicting meaning must stay visible.
 - Never imply that inherited class review means every field was individually inspected.
-- Surface 409 grounding errors; do not retry them automatically.
+- Surface workspace conflicts such as concurrent mutations or unsafe refreshes; do not retry them automatically.
 - Keep review actions keyboard-accessible.
 - Avoid exposing credentials or raw sensitive values in browser state.

@@ -1,4 +1,6 @@
-# Plan: Safe workspaces for multiple data sources
+# Implementation record: Safe workspaces for multiple data sources
+
+Status: **implemented and validated in August 2026**. The risk analysis and steps below are retained as the design record; descriptions of the previous system refer to the state before this work landed.
 
 ## Goal
 
@@ -6,9 +8,9 @@ Make PostgreSQL, Snowflake, and future data sources coexist safely inside one tr
 
 This is **not** a multi-tenant plan. Atlas will continue to run as one trusted installation for one team. Authentication, mutually untrusted customer organizations, tenant-aware storage, RBAC, external secret managers, shared job infrastructure, and multi-instance deployment are out of scope.
 
-## Current Understanding
+## Pre-implementation understanding
 
-### What works today
+### What already worked
 
 - PostgreSQL and Snowflake can coexist as different entries in `sources.yaml`.
 - The console conventionally extracts a source into a workspace with the same name as the source.
@@ -16,7 +18,7 @@ This is **not** a multi-tenant plan. Atlas will continue to run as one trusted i
 - A snapshot records `source_id`, and analysis resolves the matching adapter from that source's connection URL.
 - There is no global active database in the engine. Adding Snowflake does not replace PostgreSQL when source and workspace names remain distinct.
 
-### What is unsafe today
+### Risks this work addressed
 
 - Source/workspace binding is only a UI convention. API and CLI connection overrides can extract or analyze a different datastore through an existing workspace.
 - Replacing `snapshot.yaml` does not atomically invalidate or replace facts, evidence, questions, output, and human reviews created from the previous snapshot.
@@ -50,7 +52,7 @@ This is **not** a multi-tenant plan. Atlas will continue to run as one trusted i
 - Cross-database joins, federated SQL, or one semantic graph spanning several sources.
 - Changing the PostgreSQL or Snowflake adapter contracts.
 
-## Proposed Model
+## Implemented model
 
 ```text
 Source
@@ -97,7 +99,7 @@ The manifest is the authority for source binding. `snapshot.source_id` is repeat
 10. Removing a referenced source is blocked until its workspaces are explicitly removed or archived.
 11. PostgreSQL and Snowflake failures remain isolated to their own sources/workspaces.
 
-## Step-by-Step Implementation Plan
+## Implementation steps
 
 ### 1. Add explicit workspace manifests
 

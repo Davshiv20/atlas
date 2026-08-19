@@ -634,13 +634,16 @@ Agents should query the semantic layer rather than receive unrestricted access t
 
 Source-specific ingestion should be modular.
 
-### Initial adapter
+### Established adapter
 
-Postgres.
+PostgreSQL.
+
+### Early adapter
+
+Snowflake supports connection, reflection, sampled profiling, typed checks, query tagging, and timeouts. It still requires validation against each target account before production use.
 
 ### Later adapters
 
-- Snowflake
 - BigQuery
 - MySQL
 - SQL Server
@@ -1000,7 +1003,8 @@ That is agent operational knowledge, not generic metadata.
 
 ### Phase 7 — Expansion
 
-- Snowflake / BigQuery / MySQL
+- production-hardening the early Snowflake adapter
+- BigQuery / MySQL
 - MCP
 - SDKs
 - domain templates

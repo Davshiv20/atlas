@@ -39,7 +39,7 @@ import engine internals or maintain an independent interpretation of API models.
   freshness, and query hash.
 - Atomic semantic claims with provenance, grounding rules, and factorized confidence as an evidence-derived trust score.
 - Deterministic relationship discovery from constraints and schema conventions.
-- Human review for claims and questions that database evidence cannot settle.
+- Human review recorded as attributable evidence, with endorsement derived separately from evidence-derived trust.
 - A review console with Sources, Map, table-sheet Review, and Questions surfaces.
 - A derived semantic view for agent consumption.
 
@@ -149,8 +149,8 @@ outside `atlas/metadata/` names a path:
 ### Getting the view out
 
 ```bash
-curl localhost:8000/workspaces/elara/export              # what passed review
-curl "localhost:8000/workspaces/elara/export?include=all"  # plus the unvalidated
+curl localhost:8000/workspaces/demo/export              # what passed review
+curl "localhost:8000/workspaces/demo/export?include=all"  # plus the unvalidated
 ```
 
 One URL, two uses. Without `download=1` it is a resource an agent or a CI job can keep
