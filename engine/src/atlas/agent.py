@@ -516,9 +516,11 @@ def build_tools(
         ),
         _tool(
             "record_claim",
-            "Record a claim, citing the evidence ids returned by checks you ran. A claim "
-            "of any consequence needs at least one; without evidence, ask a question "
-            "instead. Atlas computes the confidence — you do not choose it.",
+            "Record a claim, citing evidence ids returned by checks you ran. Structural "
+            "claims of consequence require evidence. When live checks are unavailable, a "
+            "narrow cached-snapshot semantics hypothesis may use an empty evidence list; "
+            "Atlas keeps it unsupported and unverified. Ask a question for business intent "
+            "the snapshot cannot establish. Atlas computes confidence — you do not.",
             {
                 "subject": string,
                 "aspect": {"type": "string", "enum": list(ASPECTS)},
